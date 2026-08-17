@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <imgui.h>
+#include <imgui_internal.h>  // ImGui::IsNamedKey()
 #include <imgui_stdlib.h>
 
 extern "C" {
@@ -135,6 +136,10 @@ static int l_text_colored(lua_State* L) {
   ImGui::TextColored(c, "%s", s);
   return 0;
 }
+static int l_text_wrapped(lua_State* L) {
+  ImGui::TextWrapped("%s", luaL_checkstring(L, 1));
+  return 0;
+}
 static int l_label_text(lua_State* L) {
   ImGui::LabelText("%s", luaL_checkstring(L, 1), "%s", luaL_checkstring(L, 2));
   return 0;
@@ -255,6 +260,17 @@ static int l_drag_float(lua_State* L) {
   lua_pushnumber(L, v);
   return 2;
 }
+static int l_drag_int(lua_State* L) {
+  const char* label = luaL_checkstring(L, 1);
+  int v = (int)luaL_checkinteger(L, 2);
+  float speed = (float)luaL_optnumber(L, 3, 1.0f);
+  int min_v = (int)luaL_optinteger(L, 4, 0);
+  int max_v = (int)luaL_optinteger(L, 5, 0);
+  bool changed = ImGui::DragInt(label, &v, speed, min_v, max_v);
+  lua_pushboolean(L, changed);
+  lua_pushinteger(L, v);
+  return 2;
+}
 static int l_input_int(lua_State* L) {
   int v = (int)luaL_checkinteger(L, 2);
   bool changed = ImGui::InputInt(luaL_checkstring(L, 1), &v,
@@ -298,6 +314,24 @@ static int l_color_edit3(lua_State* L) {
   lua_pushboolean(L, changed);
   for (int i = 0; i < 3; i++) lua_pushnumber(L, c[i]);
   return 4;
+}
+static int l_color_picker3(lua_State* L) {
+  float c[3] = {(float)luaL_checknumber(L, 2), (float)luaL_checknumber(L, 3),
+                (float)luaL_checknumber(L, 4)};
+  ImGuiColorEditFlags flags = (ImGuiColorEditFlags)luaL_optinteger(L, 5, 0);
+  bool changed = ImGui::ColorPicker3(luaL_checkstring(L, 1), c, flags);
+  lua_pushboolean(L, changed);
+  for (int i = 0; i < 3; i++) lua_pushnumber(L, c[i]);
+  return 4;
+}
+static int l_color_picker4(lua_State* L) {
+  float c[4] = {(float)luaL_checknumber(L, 2), (float)luaL_checknumber(L, 3),
+                (float)luaL_checknumber(L, 4), (float)luaL_optnumber(L, 5, 1.0)};
+  ImGuiColorEditFlags flags = (ImGuiColorEditFlags)luaL_optinteger(L, 6, 0);
+  bool changed = ImGui::ColorPicker4(luaL_checkstring(L, 1), c, flags);
+  lua_pushboolean(L, changed);
+  for (int i = 0; i < 4; i++) lua_pushnumber(L, c[i]);
+  return 5;
 }
 static int l_color_button(lua_State* L) {
   const char* id = luaL_checkstring(L, 1);
@@ -353,6 +387,10 @@ static int l_table_next_row(lua_State* L) {
   ImGui::TableNextRow();
   return 0;
 }
+static int l_table_next_column(lua_State* L) {
+  lua_pushboolean(L, ImGui::TableNextColumn());
+  return 1;
+}
 static int l_table_set_column_index(lua_State* L) {
   ImGui::TableSetColumnIndex((int)luaL_checkinteger(L, 1));
   return 0;
@@ -383,6 +421,12 @@ static int l_tree_pop(lua_State* L) {
   ImGui::TreePop();
   return 0;
 }
+static int l_collapsing_header(lua_State* L) {
+  bool open = ImGui::CollapsingHeader(luaL_checkstring(L, 1),
+                                      (ImGuiTreeNodeFlags)luaL_optinteger(L, 2, 0));
+  lua_pushboolean(L, open);
+  return 1;
+}
 static int l_begin_list_box(lua_State* L) {
   bool open = ImGui::BeginListBox(luaL_checkstring(L, 1),
                                   ImVec2((float)luaL_optnumber(L, 2, 0),
@@ -394,11 +438,38 @@ static int l_end_list_box(lua_State* L) {
   ImGui::EndListBox();
   return 0;
 }
+static int l_begin_tab_bar(lua_State* L) {
+  bool open = ImGui::BeginTabBar(luaL_checkstring(L, 1),
+                                 (ImGuiTabBarFlags)luaL_optinteger(L, 2, 0));
+  lua_pushboolean(L, open);
+  return 1;
+}
+static int l_end_tab_bar(lua_State* L) {
+  ImGui::EndTabBar();
+  return 0;
+}
+static int l_begin_tab_item(lua_State* L) {
+  bool open = ImGui::BeginTabItem(luaL_checkstring(L, 1), nullptr,
+                                  (ImGuiTabItemFlags)luaL_optinteger(L, 2, 0));
+  lua_pushboolean(L, open);
+  return 1;
+}
+static int l_end_tab_item(lua_State* L) {
+  ImGui::EndTabItem();
+  return 0;
+}
 
 // ── popups / menus / tooltips ───────────────────────────────────────────────
 
 static int l_begin_popup_context_item(lua_State* L) {
   bool open = ImGui::BeginPopupContextItem(
+      lua_isnoneornil(L, 1) ? nullptr : luaL_checkstring(L, 1),
+      (ImGuiPopupFlags)luaL_optinteger(L, 2, 1));
+  lua_pushboolean(L, open);
+  return 1;
+}
+static int l_begin_popup_context_window(lua_State* L) {
+  bool open = ImGui::BeginPopupContextWindow(
       lua_isnoneornil(L, 1) ? nullptr : luaL_checkstring(L, 1),
       (ImGuiPopupFlags)luaL_optinteger(L, 2, 1));
   lua_pushboolean(L, open);
@@ -431,6 +502,18 @@ static int l_begin_menu(lua_State* L) {
   bool open = ImGui::BeginMenu(luaL_checkstring(L, 1), opt_bool(L, 2, true));
   lua_pushboolean(L, open);
   return 1;
+}
+static int l_end_menu(lua_State* L) {
+  ImGui::EndMenu();
+  return 0;
+}
+static int l_begin_menu_bar(lua_State* L) {
+  lua_pushboolean(L, ImGui::BeginMenuBar());
+  return 1;
+}
+static int l_end_menu_bar(lua_State* L) {
+  ImGui::EndMenuBar();
+  return 0;
 }
 static int l_menu_item(lua_State* L) {
   bool hit = ImGui::MenuItem(luaL_checkstring(L, 1),
@@ -525,6 +608,16 @@ static int l_dl_add_circle_filled(lua_State* L) {
   dl->AddCircleFilled(c, rad, col, (int)luaL_optinteger(L, 9, 24));
   return 0;
 }
+static int l_dl_add_circle(lua_State* L) {
+  ImDrawList* dl = check_dl(L, 1);
+  ImVec2 c((float)luaL_checknumber(L, 2), (float)luaL_checknumber(L, 3));
+  float rad = (float)luaL_checknumber(L, 4);
+  ImU32 col = col32(L, 5);
+  int segs = (int)luaL_optinteger(L, 9, 0);
+  float thickness = (float)luaL_optnumber(L, 10, 1.0f);
+  dl->AddCircle(c, rad, col, segs, thickness);
+  return 0;
+}
 static int l_dl_add_triangle_filled(lua_State* L) {
   ImDrawList* dl = check_dl(L, 1);
   ImVec2 a((float)luaL_checknumber(L, 2), (float)luaL_checknumber(L, 3));
@@ -615,6 +708,10 @@ static int l_set_next_window_size(lua_State* L) {
                                   (float)luaL_checknumber(L, 2)));
   return 0;
 }
+static int l_set_next_window_bg_alpha(lua_State* L) {
+  ImGui::SetNextWindowBgAlpha((float)luaL_checknumber(L, 1));
+  return 0;
+}
 
 // ── state / info ────────────────────────────────────────────────────────────
 
@@ -655,6 +752,10 @@ static int l_is_mouse_down(lua_State* L) {
 static int l_is_mouse_clicked(lua_State* L) {
   lua_pushboolean(L, ImGui::IsMouseClicked((ImGuiMouseButton)luaL_checkinteger(L, 1),
                                            opt_bool(L, 2, false)));
+  return 1;
+}
+static int l_is_mouse_released(lua_State* L) {
+  lua_pushboolean(L, ImGui::IsMouseReleased((ImGuiMouseButton)luaL_optinteger(L, 1, 0)));
   return 1;
 }
 static int l_is_mouse_dragging(lua_State* L) {
@@ -756,7 +857,7 @@ static int l_pop_id(lua_State* L) {
 }
 static int l_is_key_pressed(lua_State* L) {
   ImGuiKey key = (ImGuiKey)luaL_checkinteger(L, 1);
-  if (key < ImGuiKey_NamedKey_BEGIN || key >= ImGuiKey_NamedKey_END) {
+  if (!ImGui::IsNamedKey(key)) {
     return luaL_error(L, "is_key_pressed: %d is not a valid ImGuiKey (use ig.key.* constants)", (int)key);
   }
   lua_pushboolean(L, ImGui::IsKeyPressed(key, opt_bool(L, 2, false)));
@@ -764,7 +865,7 @@ static int l_is_key_pressed(lua_State* L) {
 }
 static int l_is_key_down(lua_State* L) {
   ImGuiKey key = (ImGuiKey)luaL_checkinteger(L, 1);
-  if (key < ImGuiKey_NamedKey_BEGIN || key >= ImGuiKey_NamedKey_END) {
+  if (!ImGui::IsNamedKey(key)) {
     return luaL_error(L, "is_key_down: %d is not a valid ImGuiKey (use ig.key.* constants)", (int)key);
   }
   lua_pushboolean(L, ImGui::IsKeyDown(key));
@@ -824,6 +925,7 @@ void ig_register(lua_State* L) {
   REG(unindent);
   REG(text);
   REG(text_colored);
+  REG(text_wrapped);
   REG(label_text);
   REG(bullet_text);
   REG(align_text);
@@ -839,12 +941,15 @@ void ig_register(lua_State* L) {
   REG(slider_float);
   REG(slider_int);
   REG(drag_float);
+  REG(drag_int);
   REG(input_int);
   REG(input_float);
   REG(input_text);
   REG(color_edit4);
   REG(color_edit3);
   REG(color_button);
+  REG(color_picker4);
+  REG(color_picker3);
   REG(set_next_item_width);
   REG(begin_disabled);
   REG(end_disabled);
@@ -853,13 +958,20 @@ void ig_register(lua_State* L) {
   REG(table_setup_column);
   REG(table_headers_row);
   REG(table_next_row);
+  REG(table_next_column);
   REG(table_set_column_index);
   REG(end_table);
   REG(selectable);
   REG(tree_node);
   REG(tree_pop);
+  REG(collapsing_header);
   REG(begin_list_box);
   REG(end_list_box);
+  REG(begin_tab_bar);
+  REG(end_tab_bar);
+  REG(begin_tab_item);
+  REG(end_tab_item);
+  REG(begin_popup_context_window);
   REG(begin_popup_context_item);
   REG(open_popup);
   REG(begin_popup);
@@ -867,6 +979,9 @@ void ig_register(lua_State* L) {
   REG(end_popup);
   REG(close_current_popup);
   REG(begin_menu);
+  REG(end_menu);
+  REG(begin_menu_bar);
+  REG(end_menu_bar);
   REG(menu_item);
   REG(set_tooltip);
   REG(begin_tooltip);
@@ -879,6 +994,7 @@ void ig_register(lua_State* L) {
   REG(dl_add_line);
   REG(dl_add_text);
   REG(dl_add_circle_filled);
+  REG(dl_add_circle);
   REG(dl_add_triangle_filled);
   REG(dl_push_clip_rect);
   REG(dl_pop_clip_rect);
@@ -891,6 +1007,7 @@ void ig_register(lua_State* L) {
   REG(has_font);
   REG(set_next_window_pos);
   REG(set_next_window_size);
+  REG(set_next_window_bg_alpha);
   REG(is_item_clicked);
   REG(is_item_active);
   REG(reset_mouse_drag_delta);
@@ -901,6 +1018,7 @@ void ig_register(lua_State* L) {
   REG(is_window_focused);
   REG(is_mouse_down);
   REG(is_mouse_clicked);
+  REG(is_mouse_released);
   REG(is_mouse_dragging);
   REG(get_mouse_pos);
   REG(get_mouse_drag_delta);

@@ -177,7 +177,7 @@ function preview.frame(rect)
     if not doc.action then
         -- Bare Scroll Wheel -> Dolly
         if is_hovered and io.mouse_wheel ~= 0 then
-            local factor = math.pow(1.15, -io.mouse_wheel)
+            local factor = 1.15 ^ (-io.mouse_wheel)
             preview.cam.target_dist = clamp(preview.cam.target_dist * factor, 1.0, 100.0)
         end
 
@@ -271,64 +271,77 @@ function preview.frame(rect)
 
     -- Render 3D Model Mesh
     if doc.mesh then
+        -- Collect and sort faces by depth (painter's algorithm)
+        local sorted_faces = {}
         for f_idx, f in ipairs(doc.mesh.faces) do
-            local is_selected = (f_idx == doc.selected_face)
             local pts = {}
             local all_front = true
+            local avg_z = 0
             for _, vi in ipairs(f.verts) do
                 local v = doc.mesh.vertices[vi]
                 if v and v.pos then
                     local sx, sy, sz = world_to_screen(v.pos[1], v.pos[2], v.pos[3])
                     pts[#pts + 1] = { sx, sy, sz }
+                    avg_z = avg_z + sz
                     if sz <= 0 then all_front = false end
                 end
             end
-
             if all_front and #pts >= 3 then
-                local norm = f.normal or mesh.calculate_face_normal(doc.mesh, f)
-                local nx, ny, nz = norm[1], norm[2], norm[3]
-                local light_dot = math.max(0.15, nx * 0.5 + ny * 0.7 + nz * 0.5)
+                avg_z = avg_z / #pts
+                sorted_faces[#sorted_faces + 1] = { f_idx = f_idx, f = f, pts = pts, avg_z = avg_z }
+            end
+        end
+        table.sort(sorted_faces, function(a, b) return a.avg_z > b.avg_z end)
 
-                local shade_r = is_selected and (theme.accent[1] * 0.9) or (0.45 * light_dot)
-                local shade_g = is_selected and (theme.accent[2] * 0.9) or (0.50 * light_dot)
-                local shade_b = is_selected and (theme.accent[3] * 0.9) or (0.60 * light_dot)
+        for _, sf in ipairs(sorted_faces) do
+            local f_idx = sf.f_idx
+            local f = sf.f
+            local pts = sf.pts
+            local is_selected = (f_idx == doc.selected_face)
 
-                -- Draw Triangles
-                ig.dl_add_triangle_filled(dl, pts[1][1], pts[1][2], pts[2][1], pts[2][2], pts[3][1], pts[3][2],
+            local norm = f.normal or mesh.calculate_face_normal(doc.mesh, f)
+            local nx, ny, nz = norm[1], norm[2], norm[3]
+            local light_dot = math.max(0.15, nx * 0.5 + ny * 0.7 + nz * 0.5)
+
+            local shade_r = is_selected and (theme.accent[1] * 0.9) or (0.45 * light_dot)
+            local shade_g = is_selected and (theme.accent[2] * 0.9) or (0.50 * light_dot)
+            local shade_b = is_selected and (theme.accent[3] * 0.9) or (0.60 * light_dot)
+
+            -- Draw Triangles
+            ig.dl_add_triangle_filled(dl, pts[1][1], pts[1][2], pts[2][1], pts[2][2], pts[3][1], pts[3][2],
+                shade_r, shade_g, shade_b, 0.95)
+            if #pts == 4 then
+                ig.dl_add_triangle_filled(dl, pts[1][1], pts[1][2], pts[3][1], pts[3][2], pts[4][1], pts[4][2],
                     shade_r, shade_g, shade_b, 0.95)
-                if #pts == 4 then
-                    ig.dl_add_triangle_filled(dl, pts[1][1], pts[1][2], pts[3][1], pts[3][2], pts[4][1], pts[4][2],
-                        shade_r, shade_g, shade_b, 0.95)
+            end
+
+            -- Wireframe Edges
+            local edge_r = is_selected and 1.0 or 0.28
+            local edge_g = is_selected and 1.0 or 0.32
+            local edge_b = is_selected and 1.0 or 0.40
+            local thick = is_selected and 2.5 or 1.0
+
+            for i = 1, #pts do
+                local next_i = (i % #pts) + 1
+                ig.dl_add_line(dl, pts[i][1], pts[i][2], pts[next_i][1], pts[next_i][2], edge_r, edge_g, edge_b, 0.85, thick)
+            end
+
+            -- 3D Normal Gizmo
+            if is_selected and not doc.action then
+                local fc_x, fc_y, fc_z = 0, 0, 0
+                for _, vi in ipairs(f.verts) do
+                    local vp = doc.mesh.vertices[vi].pos
+                    fc_x = fc_x + vp[1]; fc_y = fc_y + vp[2]; fc_z = fc_z + vp[3]
                 end
+                fc_x = fc_x / #f.verts; fc_y = fc_y / #f.verts; fc_z = fc_z / #f.verts
 
-                -- Wireframe Edges
-                local edge_r = is_selected and 1.0 or 0.28
-                local edge_g = is_selected and 1.0 or 0.32
-                local edge_b = is_selected and 1.0 or 0.40
-                local thick = is_selected and 2.5 or 1.0
+                local g_len = 1.0
+                local gn_x, gn_y, gn_z = world_to_screen(fc_x + nx * g_len, fc_y + ny * g_len, fc_z + nz * g_len)
+                local sc_x, sc_y, sc_z = world_to_screen(fc_x, fc_y, fc_z)
 
-                for i = 1, #pts do
-                    local next_i = (i % #pts) + 1
-                    ig.dl_add_line(dl, pts[i][1], pts[i][2], pts[next_i][1], pts[next_i][2], edge_r, edge_g, edge_b, 0.85, thick)
-                end
-
-                -- 3D Normal Gizmo
-                if is_selected and not doc.action then
-                    local fc_x, fc_y, fc_z = 0, 0, 0
-                    for _, vi in ipairs(f.verts) do
-                        local vp = doc.mesh.vertices[vi].pos
-                        fc_x = fc_x + vp[1]; fc_y = fc_y + vp[2]; fc_z = fc_z + vp[3]
-                    end
-                    fc_x = fc_x / #f.verts; fc_y = fc_y / #f.verts; fc_z = fc_z / #f.verts
-
-                    local g_len = 1.0
-                    local gn_x, gn_y, gn_z = world_to_screen(fc_x + nx * g_len, fc_y + ny * g_len, fc_z + nz * g_len)
-                    local sc_x, sc_y, sc_z = world_to_screen(fc_x, fc_y, fc_z)
-
-                    if sc_z > 0 then
-                        ig.dl_add_line(dl, sc_x, sc_y, gn_x, gn_y, 1.0, 0.85, 0.2, 1.0, 3.5)
-                        ig.dl_add_circle_filled(dl, gn_x, gn_y, 5.0, 1.0, 0.85, 0.2, 1.0)
-                    end
+                if sc_z > 0 then
+                    ig.dl_add_line(dl, sc_x, sc_y, gn_x, gn_y, 1.0, 0.85, 0.2, 1.0, 3.5)
+                    ig.dl_add_circle_filled(dl, gn_x, gn_y, 5.0, 1.0, 0.85, 0.2, 1.0)
                 end
             end
         end

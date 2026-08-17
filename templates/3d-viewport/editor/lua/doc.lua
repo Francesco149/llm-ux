@@ -86,6 +86,61 @@ function doc.restore(snap)
     doc.mark_dirty()
 end
 
+-- ── JSON serialization (pure Lua, no external deps) ─────────────────────────
+local json_esc = {
+    ['"'] = '\\"',
+    ['\\'] = '\\\\',
+    ['\b'] = '\\b',
+    ['\f'] = '\\f',
+    ['\n'] = '\\n',
+    ['\r'] = '\\r',
+    ['\t'] = '\\t',
+}
+
+local function json_escape(s)
+    return s:gsub('[%c"\\]', function(c)
+        return json_esc[c] or string.format("\\u%04x", c:byte())
+    end)
+end
+
+local function json_encode(value)
+    local function enc(v, seen)
+        local t = type(v)
+        if t == "nil" then
+            return "null"
+        elseif t == "boolean" then
+            return v and "true" or "false"
+        elseif t == "number" then
+            if v ~= v or v == math.huge or v == -math.huge then return "null" end
+            return string.format("%.17g", v)
+        elseif t == "string" then
+            return '"' .. json_escape(v) .. '"'
+        elseif t == "table" then
+            if seen[v] then return "null" end
+            seen[v] = true
+            local n = #v
+            local parts = {}
+            if n > 0 then
+                for i = 1, n do parts[i] = enc(v[i], seen) end
+            else
+                for k, val in pairs(v) do
+                    parts[#parts + 1] = '"' .. json_escape(tostring(k)) .. '":' .. enc(val, seen)
+                end
+            end
+            seen[v] = nil
+            return (n > 0 and "[" or "{") .. table.concat(parts, ",") .. (n > 0 and "]" or "}")
+        end
+        return "null"
+    end
+    return enc(value, {})
+end
+
+-- doc.save — persist the document as a JSON project file in the working directory
+function doc.save()
+    if not lp or not lp.file then return false end
+    return lp.file.write(doc.name .. ".json", json_encode(doc.snapshot()))
+end
+
 function doc.mutate(fn, desc)
     if undo then undo.push(desc or "Model Edit") end
     fn()

@@ -45,3 +45,44 @@ The definitive framework, harness configuration, and skill repository for gettin
   - `docs/DIRECT_MANIPULATION_AND_FEEL.md` -> HCI principles, Fitts's law, spring physics.
   - `docs/WINDOWS_COMPAT_AND_WIN7.md` -> Cross-compilation, SDL_Renderer vs WGL, static runtimes.
   - `docs/ZERO_DATA_LOSS_AND_UNDO.md` -> Undo coalescing, state journaling, crash resilience.
+
+## Test Gate Architecture
+The `make test` gate runs four test suites in order. All must pass:
+1. **`test_lua54_compat`** — Scans `editor/lua/*.lua` for removed Lua 5.4 APIs (`math.pow`, `unpack`, `loadstring`, etc.). Catches the entire class of "works in 5.1, crashes in 5.4" bugs at build time.
+2. **`test_binding_parity`** — Verifies every expected `ig.*` function and `ig.key.*` constant is registered and callable. Catches the "C++ function exists but missing from REG() table" class.
+3. **`test_mesh`** / domain tests — State mutation invariants (extrude adds faces, undo restores count, etc.).
+4. **`test_ui_smoke`** — Exercises key constants > 500, `reset_mouse_drag_delta`, modal action state transitions, raycast intersection.
+
+## Multi-Model Delegation Strategy
+
+### Current Model Routing
+- **Primary builder**: Gemini 3.7 Flash (via `google-antigravity` OAuth, free with AI Pro subscription). Handles scaffolding, feature implementation, and iterative refinement. Cheap enough for long multi-turn sessions.
+- **Adversarial reviewer**: Claude Opus 4.6 or DeepSeek V4 Flash via `omp --model`. Used for one-shot adversarial code review of completed work.
+- **Vision**: Qwen 3.7 Flash (OpenRouter, ~$0.03/1M input tokens) for screenshot inspection of `--shot` output.
+
+### When to Offload to Opus or DeepSeek V4
+Gemini Flash is sufficient for ~80% of the work (Lua feature code, panel layout, theme tuning, basic 3D math). Offload to a stronger model when:
+
+| Trigger | Target Model | Mechanism |
+|---|---|---|
+| **Adversarial review** of completed template/app | Opus 4.6 or DeepSeek V4 | `omp --model google-antigravity/claude-opus-4-6` (or `deepseek/deepseek-v4-flash`) in a new session, pointed at the repo |
+| **C++ binding layer changes** (ig.cpp, lua.cpp) | Opus 4.6 | C++ template metaprogramming, ABI reasoning, UB detection |
+| **Cross-platform debugging** (Windows/Wine failures) | DeepSeek V4 | Cheap enough for iterative debugging; strong systems knowledge |
+| **Architecture decisions** (new template design, skill restructuring) | Opus 4.6 | Better at multi-file reasoning and taste |
+| **3D math / projection bugs** | Either | Matrix algebra, winding order, projection correctness |
+
+### Can Gemini Spawn Opus/DeepSeek Autonomously?
+**Not yet, but feasible.** The mechanism would be:
+1. Gemini runs `make test` and `make shot` after completing work
+2. If tests pass, Gemini shells out: `omp --model google-antigravity/claude-opus-4-6 --oneshot "Review /opt/src/foo for the issues in REVIEW_DOSSIER.md, write findings to docs/review.md"`
+3. Gemini reads the review output and applies fixes
+
+**Blockers**: omp doesn't currently support `--oneshot` mode for non-interactive review. The workaround is manual: human switches model or opens a second session. This is a reasonable human-in-the-loop checkpoint — adversarial review is precisely where human judgment adds most value.
+
+### Cost Analysis
+- Gemini 3.7 Flash (AI Pro): **Free** for typical usage within subscription quota
+- DeepSeek V4 Flash: ~$0.20/M input, ~$0.80/M output → a 50-turn scaffolding session ≈ $1-3
+- Opus 4.6 (AI Pro): **Free** within subscription quota (same `google-antigravity` OAuth)
+- Qwen 3.7 Flash vision: ~$0.03/M → screenshot inspection ≈ $0.001/shot
+
+**Recommendation**: Use Gemini Flash as the primary builder (free). Run Opus adversarial reviews after each major milestone (also free via AI Pro). Reserve DeepSeek V4 for parallel independent debugging sessions where the $1-3 cost is justified by time savings. The current setup of "build with Flash, review with Opus" is near-optimal for cost.

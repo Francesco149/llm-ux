@@ -48,10 +48,14 @@ int main(int argc, char** argv) {
     }
 
     if (has_arg(argc, argv, "--shot")) {
+        // headless screenshot: offscreen SDL driver; LP_SHOT tells app.cpp to
+        // skip vsync (offscreen drivers have no refresh to sync to).
 #ifdef _WIN32
         _putenv("SDL_VIDEODRIVER=offscreen");
+        _putenv("LP_SHOT=1");
 #else
         setenv("SDL_VIDEODRIVER", "offscreen", 1);
+        setenv("LP_SHOT", "1", 1);
 #endif
     }
 

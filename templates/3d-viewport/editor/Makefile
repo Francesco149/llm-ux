@@ -86,6 +86,10 @@ $(OBJL)/%.o: $(IMGUI)/misc/cpp/%.cpp | $(OBJL)
 	$(LINUX_CXX) $(LINUX_CXXFLAGS) -c $< -o $@
 $(OBJL)/lua/%.o: $(LUA)/src/%.c | $(OBJL)/lua
 	$(CC) -O2 -std=c11 -I $(LUA)/src -c $< -o $@
+$(OBJ)/app.o: src/app.cpp src/editor.h $(FONTS_H) | $(OBJ)
+	$(WIN_CXX) $(WIN_CXXFLAGS) -c src/app.cpp -o $@
+$(OBJL)/app.o: src/app.cpp src/editor.h $(FONTS_H) | $(OBJL)
+	$(LINUX_CXX) $(LINUX_CXXFLAGS) -c src/app.cpp -o $@
 
 $(FONTS_H): ../tools/embed.py $(FONT_UI) $(FONT_MONO) | $(BUILD)
 	python3 ../tools/embed.py $@ \

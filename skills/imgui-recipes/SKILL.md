@@ -54,7 +54,7 @@ function canvas.render_viewport(w, h, draw_callback)
     
     -- 1. Zoom centered on cursor
     if is_hovered and io.mouse_wheel ~= 0 then
-        local zoom_factor = math.pow(1.15, io.mouse_wheel)
+        local zoom_factor = 1.15 ^ io.mouse_wheel
         local new_target_zoom = math.max(canvas.min_zoom, math.min(canvas.max_zoom, canvas.target_zoom * zoom_factor))
         
         -- Anchor mouse world position
@@ -334,4 +334,161 @@ function modal.update_and_render_hud(doc, undo, mx, my, avail_w, avail_h, x0, y0
     end
 end
 ```
+
+---
+
+## 7. 3D DrawList Rendering with Painter's Algorithm (Depth Sorting)
+
+ImGui DrawList has **no Z-buffer**. Rendering 3D meshes via projected triangles requires sorting faces back-to-front (painter's algorithm) before drawing. Without this, back faces render on top of front faces.
+
+```lua
+function render_mesh_sorted(dl, doc, world_to_screen, mesh)
+    -- Phase 1: Project all faces, compute average depth
+    local sorted_faces = {}
+    for f_idx, f in ipairs(doc.mesh.faces) do
+        local pts = {}
+        local all_front = true
+        local avg_z = 0
+        for _, vi in ipairs(f.verts) do
+            local v = doc.mesh.vertices[vi]
+            if v and v.pos then
+                local sx, sy, sz = world_to_screen(v.pos[1], v.pos[2], v.pos[3])
+                pts[#pts + 1] = { sx, sy, sz }
+                avg_z = avg_z + sz
+                if sz <= 0 then all_front = false end
+            end
+        end
+        if all_front and #pts >= 3 then
+            avg_z = avg_z / #pts
+            sorted_faces[#sorted_faces + 1] = {
+                f_idx = f_idx, f = f, pts = pts, avg_z = avg_z
+            }
+        end
+    end
+
+    -- Phase 2: Sort farthest-first (larger Z = farther from camera)
+    table.sort(sorted_faces, function(a, b) return a.avg_z > b.avg_z end)
+
+    -- Phase 3: Draw in sorted order
+    for _, sf in ipairs(sorted_faces) do
+        local f_idx, f, pts = sf.f_idx, sf.f, sf.pts
+        local is_selected = (f_idx == doc.selected_face)
+
+        -- Compute face normal for lighting
+        local norm = f.normal or mesh.calculate_face_normal(doc.mesh, f)
+        local light_dot = math.max(0.15, norm[1] * 0.5 + norm[2] * 0.7 + norm[3] * 0.5)
+
+        local r = is_selected and 0.86 or (0.45 * light_dot)
+        local g = is_selected and 0.56 or (0.50 * light_dot)
+        local b = is_selected and 0.04 or (0.60 * light_dot)
+
+        -- Filled triangles (fan from first vertex for quads)
+        ig.dl_add_triangle_filled(dl,
+            pts[1][1], pts[1][2], pts[2][1], pts[2][2], pts[3][1], pts[3][2],
+            r, g, b, 0.95)
+        if #pts == 4 then
+            ig.dl_add_triangle_filled(dl,
+                pts[1][1], pts[1][2], pts[3][1], pts[3][2], pts[4][1], pts[4][2],
+                r, g, b, 0.95)
+        end
+
+        -- Wireframe edges
+        for i = 1, #pts do
+            local ni = (i % #pts) + 1
+            ig.dl_add_line(dl, pts[i][1], pts[i][2], pts[ni][1], pts[ni][2],
+                0.28, 0.32, 0.40, 0.85, is_selected and 2.5 or 1.0)
+        end
+    end
+end
 ```
+
+---
+
+## 8. Interactive 3D Axis Gizmo with Mouse Drag (Move/Scale)
+
+Visual-only gizmo arrows are insufficient. Gizmo axes MUST be draggable to move/scale objects directly in the viewport. This recipe implements hit-testing on projected axis lines and constrained dragging.
+
+```lua
+local gizmo = {
+    active_axis = nil,  -- "x", "y", "z", or nil
+    drag_origin = nil,  -- world position at drag start
+    drag_start_mouse = nil,
+}
+
+function gizmo.draw_and_interact(dl, obj, world_to_screen, screen_to_ray, mx, my, is_hovered)
+    local bx, by, bz = obj.pos[1], obj.pos[2], obj.pos[3]
+    local g_len = 1.5
+
+    -- Project axis endpoints
+    local gc_x, gc_y, gc_z = world_to_screen(bx, by, bz)
+    local gx_x, gx_y, gx_z = world_to_screen(bx + g_len, by, bz)
+    local gy_x, gy_y, gy_z = world_to_screen(bx, by + g_len, bz)
+    local gz_x, gz_y, gz_z = world_to_screen(bx, by, bz + g_len)
+
+    if gc_z <= 0 then return end
+
+    -- Axis definitions: {endpoint_screen, color, name}
+    local axes = {
+        { gx_x, gx_y, 0.95, 0.2, 0.2, "x" },
+        { gy_x, gy_y, 0.2, 0.95, 0.2, "y" },
+        { gz_x, gz_y, 0.2, 0.5, 0.95, "z" },
+    }
+
+    -- Hit test: distance from mouse to axis line segment
+    local function point_to_seg_dist(px, py, ax, ay, bx2, by2)
+        local dx, dy = bx2 - ax, by2 - ay
+        local len_sq = dx * dx + dy * dy
+        if len_sq < 1e-6 then return math.huge end
+        local t = math.max(0, math.min(1, ((px - ax) * dx + (py - ay) * dy) / len_sq))
+        local cx2, cy2 = ax + t * dx, ay + t * dy
+        return math.sqrt((px - cx2) ^ 2 + (py - cy2) ^ 2)
+    end
+
+    -- Start drag on click near axis
+    if is_hovered and ig.is_mouse_clicked(0) and not gizmo.active_axis then
+        local best_dist, best_axis = 12.0, nil -- 12px hit threshold
+        for _, a in ipairs(axes) do
+            local d = point_to_seg_dist(mx, my, gc_x, gc_y, a[1], a[2])
+            if d < best_dist then best_dist = d; best_axis = a[6] end
+        end
+        if best_axis then
+            gizmo.active_axis = best_axis
+            gizmo.drag_origin = { bx, by, bz }
+            gizmo.drag_start_mouse = { mx, my }
+        end
+    end
+
+    -- Apply constrained drag
+    if gizmo.active_axis and ig.is_mouse_down(0) then
+        local dmx = mx - gizmo.drag_start_mouse[1]
+        local dmy = my - gizmo.drag_start_mouse[2]
+        -- Project mouse delta onto axis screen direction
+        local ax_info = axes[gizmo.active_axis == "x" and 1 or (gizmo.active_axis == "y" and 2 or 3)]
+        local ax_dx = ax_info[1] - gc_x
+        local ax_dy = ax_info[2] - gc_y
+        local ax_len = math.sqrt(ax_dx * ax_dx + ax_dy * ax_dy)
+        if ax_len > 1e-3 then
+            local proj = (dmx * ax_dx + dmy * ax_dy) / ax_len
+            local world_scale = g_len / ax_len -- screen px to world units
+            local delta = proj * world_scale
+            local idx = gizmo.active_axis == "x" and 1 or (gizmo.active_axis == "y" and 2 or 3)
+            obj.pos[idx] = gizmo.drag_origin[idx] + delta
+        end
+    else
+        if gizmo.active_axis then
+            gizmo.active_axis = nil -- commit on release
+        end
+    end
+
+    -- Draw axes (highlight active)
+    for _, a in ipairs(axes) do
+        local is_active = (gizmo.active_axis == a[6])
+        local thick = is_active and 4.0 or 3.0
+        local alpha = is_active and 1.0 or 0.85
+        ig.dl_add_line(dl, gc_x, gc_y, a[1], a[2], a[3], a[4], a[5], alpha, thick)
+        ig.dl_add_circle_filled(dl, a[1], a[2], is_active and 6.0 or 4.0, a[3], a[4], a[5], alpha)
+    end
+end
+```
+
+**CRITICAL**: Gizmo arrows that only draw lines without drag interaction are useless decoration. Every gizmo MUST support mouse drag with axis-constrained movement. The recipe above provides: hit-testing → constrained drag → visual feedback → commit on release.

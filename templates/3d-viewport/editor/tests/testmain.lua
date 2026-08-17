@@ -1,5 +1,7 @@
--- testmain.lua — Headless test runner for lowpoly-painter
+-- testmain.lua — Headless test runner
+require("test_lua54_compat")
+require("test_binding_parity")
 require("test_mesh")
 require("test_ui_smoke")
-print("\n38 Low-Poly, Paint & UI Smoke assertions passed, 0 failed.")
+print("\nAll test suites passed.")
 os.exit(0)

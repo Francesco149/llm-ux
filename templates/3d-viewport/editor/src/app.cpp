@@ -156,8 +156,14 @@ int app_main(int argc, char** argv) {
         return 1;
     }
 
+    // vsync caps the interactive frame rate at the display refresh. SDL3 has
+    // no CreateRenderer flags — it's a separate call. LP_SHOT is set before
+    // SDL init in main.cpp; offscreen drivers have no refresh to sync to, so
+    // skip it there.
     if (!getenv("LP_SHOT")) {
-        SDL_SetRenderVSync(g_renderer, 1);
+        if (!SDL_SetRenderVSync(g_renderer, 1)) {
+            app_log("SDL_SetRenderVSync failed: %s", SDL_GetError());
+        }
     }
 
     IMGUI_CHECKVERSION();
