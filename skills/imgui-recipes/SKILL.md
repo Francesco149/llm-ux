@@ -491,4 +491,78 @@ function gizmo.draw_and_interact(dl, obj, world_to_screen, screen_to_ray, mx, my
 end
 ```
 
+
+---
+
+## 9. 3D Line & Grid Drawing with Near-Plane Clipping
+
+In perspective projection, points behind the camera ($z_{cam} > 0$ or $w < 0$) invert their $X/Y$ coordinates when divided by $w$. If a 3D line segment has one endpoint in front of the camera and one endpoint behind the camera:
+1. Checking `sz > 0` on both endpoints drops the entire line as soon as one end goes behind the camera near plane (causing grid lines to vanish near the ground or during camera rotation).
+2. Projecting unclipped endpoints connects the valid point to an inverted point on the opposite side of the screen, creating stray lines that shoot across the viewport to a fake horizon vanishing point.
+
+### Recipe: Camera-Space Near-Plane Line Clipping
+```lua
+-- Clips 3D line segment against camera near plane before projection
+local function draw_line_3d(dl, x1, y1, z1, x2, y2, z2, r, g, b, a, thickness, eye, fwd, world_to_screen, near_plane)
+    near_plane = near_plane or 0.15
+    local d1 = (x1 - eye[1]) * fwd[1] + (y1 - eye[2]) * fwd[2] + (z1 - eye[3]) * fwd[3]
+    local d2 = (x2 - eye[1]) * fwd[1] + (y2 - eye[2]) * fwd[2] + (z2 - eye[3]) * fwd[3]
+
+    if d1 < near_plane and d2 < near_plane then
+        return -- both endpoints behind near plane: cull completely
+    end
+
+    local px1, py1, pz1 = x1, y1, z1
+    local px2, py2, pz2 = x2, y2, z2
+
+    if d1 < near_plane then
+        local t = (near_plane - d1) / (d2 - d1)
+        px1 = x1 + t * (x2 - x1)
+        py1 = y1 + t * (y2 - y1)
+        pz1 = z1 + t * (z2 - z1)
+    elseif d2 < near_plane then
+        local t = (near_plane - d1) / (d2 - d1)
+        px2 = x1 + t * (x2 - x1)
+        py2 = y1 + t * (y2 - y1)
+        pz2 = z1 + t * (z2 - z1)
+    end
+
+    local s1x, s1y, s1z = world_to_screen(px1, py1, pz1)
+    local s2x, s2y, s2z = world_to_screen(px2, py2, pz2)
+
+    if s1z > 0 and s2z > 0 then
+        ig.dl_add_line(dl, s1x, s1y, s2x, s2y, r, g, b, a, thickness or 1.0)
+    end
+end
+```
+
+---
+
+## 10. Toolbar Sequential Layout & Relative Spacing
+
+❌ **NEVER** use hardcoded absolute horizontal coordinates (e.g. `ig.same_line(390)`) for sequential toolbar buttons. Adding or changing button labels causes subsequent buttons to overlap and clobber each other.
+
+✅ **ALWAYS** use relative flow with `ig.same_line()` and separators:
+```lua
+if ig.button("+ Box") then ... end
+ig.same_line()
+if ig.button("+ Cylinder") then ... end
+ig.same_line()
+if ig.button("+ Wedge") then ... end
+ig.same_line()
+if ig.button("+ Stairs") then ... end
+
+ig.same_line()
+ig.text_colored("|", 0.35, 0.35, 0.4, 1.0)
+
+ig.same_line()
+if ig.button("Undo") then undo.do_undo() end
+ig.same_line()
+if ig.button("Redo") then undo.do_redo() end
+```
+Right-aligned items (such as Export or Settings) should compute offsets relative to the right edge (`dw - 180`):
+```lua
+ig.same_line(dw - 180)
+if ig.button("Export (.tscn)") then ... end
+```
 **CRITICAL**: Gizmo arrows that only draw lines without drag interaction are useless decoration. Every gizmo MUST support mouse drag with axis-constrained movement. The recipe above provides: hit-testing → constrained drag → visual feedback → commit on release.

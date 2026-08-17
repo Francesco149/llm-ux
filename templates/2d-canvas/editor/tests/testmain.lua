@@ -18,6 +18,8 @@ for _, t in ipairs({ "image", "paint", "noise", "grade", "palette",
 end
 
 local ok, err = pcall(function()
+  require("test_lua54_compat")
+  require("test_binding_parity")
   local suites = { "test_json", "test_kernels", "test_doc", "test_composite",
                    "test_golden", "test_ui_smoke" }
   for _, s in ipairs(suites) do

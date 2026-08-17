@@ -35,14 +35,53 @@ function preview.get_view_proj(vp_w, vp_h)
     local cy = preview.cam.target[2] + preview.cam.dist * math.sin(rad_pitch)
     local cz = preview.cam.target[3] + preview.cam.dist * math.cos(rad_pitch) * math.cos(rad_yaw)
 
-    local view = lp.math3d.lookat(cx, cy, cz,
-        preview.cam.target[1], preview.cam.target[2], preview.cam.target[3],
-        0, 1, 0)
+    local tx, ty, tz = preview.cam.target[1], preview.cam.target[2], preview.cam.target[3]
+    local fx, fy, fz = tx - cx, ty - cy, tz - cz
+    local flen = math.sqrt(fx * fx + fy * fy + fz * fz)
+    if flen > 1e-6 then
+        fx, fy, fz = fx / flen, fy / flen, fz / flen
+    else
+        fx, fy, fz = 0, 0, -1
+    end
+
+    local view = lp.math3d.lookat(cx, cy, cz, tx, ty, tz, 0, 1, 0)
     local proj = lp.math3d.perspective(preview.cam.fov, vp_w / math.max(1.0, vp_h), 0.1, 500.0)
 
-    return view, proj, { cx, cy, cz }
+    return view, proj, { cx, cy, cz }, { fx, fy, fz }
 end
 
+-- 3D line drawing with near-plane clipping
+local function draw_line_3d(dl, x1, y1, z1, x2, y2, z2, r, g, b, a, thickness, eye, fwd, world_to_screen, near_plane)
+    near_plane = near_plane or 0.15
+    local d1 = (x1 - eye[1]) * fwd[1] + (y1 - eye[2]) * fwd[2] + (z1 - eye[3]) * fwd[3]
+    local d2 = (x2 - eye[1]) * fwd[1] + (y2 - eye[2]) * fwd[2] + (z2 - eye[3]) * fwd[3]
+
+    if d1 < near_plane and d2 < near_plane then
+        return
+    end
+
+    local px1, py1, pz1 = x1, y1, z1
+    local px2, py2, pz2 = x2, y2, z2
+
+    if d1 < near_plane then
+        local t = (near_plane - d1) / (d2 - d1)
+        px1 = x1 + t * (x2 - x1)
+        py1 = y1 + t * (y2 - y1)
+        pz1 = z1 + t * (z2 - z1)
+    elseif d2 < near_plane then
+        local t = (near_plane - d1) / (d2 - d1)
+        px2 = x1 + t * (x2 - x1)
+        py2 = y1 + t * (y2 - y1)
+        pz2 = z1 + t * (z2 - z1)
+    end
+
+    local s1x, s1y, s1z = world_to_screen(px1, py1, pz1)
+    local s2x, s2y, s2z = world_to_screen(px2, py2, pz2)
+
+    if s1z > 0 and s2z > 0 then
+        ig.dl_add_line(dl, s1x, s1y, s2x, s2y, r, g, b, a, thickness or 1.0)
+    end
+end
 function preview.frame(rect)
     ig.set_cursor_pos(0, 0)
     local avail_w, avail_h = ig.get_content_region_avail()
@@ -63,8 +102,7 @@ function preview.frame(rect)
     local is_hovered = ig.is_item_hovered()
     local mx, my = ig.get_mouse_pos()
 
-    local view, proj, cam_pos = preview.get_view_proj(avail_w, avail_h)
-
+    local view, proj, cam_eye, cam_fwd = preview.get_view_proj(avail_w, avail_h)
     local function world_to_screen(wx, wy, wz)
         local sx, sy, sz = lp.math3d.project(wx, wy, wz, view, proj, avail_w, avail_h)
         return x0 + sx, y0 + sy, sz
@@ -152,8 +190,35 @@ function preview.frame(rect)
                     }
                 end
             end
-        end
+        elseif doc.action == "scale" and doc.mesh and doc.selected_face then
+            local f = doc.mesh.faces[doc.selected_face]
+            local orig_mesh = doc.action_orig.mesh
+            local orig_f = orig_mesh.faces[doc.selected_face]
+            if f and orig_f and #orig_f.verts > 0 then
+                local cx, cy, cz = 0, 0, 0
+                for _, vi in ipairs(orig_f.verts) do
+                    local v = orig_mesh.vertices[vi]
+                    if v then
+                        cx = cx + v.pos[1]; cy = cy + v.pos[2]; cz = cz + v.pos[3]
+                    end
+                end
+                cx = cx / #orig_f.verts; cy = cy / #orig_f.verts; cz = cz / #orig_f.verts
 
+                local scale_factor = math.max(0.01, 1.0 + (d_mouse_x + d_mouse_y) * 0.01)
+                doc.action_delta = scale_factor
+
+                for i, vi in ipairs(f.verts) do
+                    local orig_v = orig_mesh.vertices[orig_f.verts[i]]
+                    if orig_v then
+                        doc.mesh.vertices[vi].pos = {
+                            cx + (orig_v.pos[1] - cx) * scale_factor,
+                            cy + (orig_v.pos[2] - cy) * scale_factor,
+                            cz + (orig_v.pos[3] - cz) * scale_factor,
+                        }
+                    end
+                end
+            end
+        end
         -- Confirm on Left-Click / Enter / Space
         if ig.is_mouse_clicked(0) or (ig.key and ig.is_key_pressed(ig.key.Enter)) then
             if undo and doc.action_orig then
@@ -254,19 +319,11 @@ function preview.frame(rect)
     ig.dl_push_clip_rect(dl, x0, y0, x0 + avail_w, y0 + avail_h, true)
     ig.dl_add_rect_filled(dl, x0, y0, x0 + avail_w, y0 + avail_h, 0.09, 0.09, 0.11, 1.0)
 
-    -- Ground Grid
+    -- Ground Grid (Near-plane clipped)
     for i = -8, 8 do
         local alpha = (i % 4 == 0) and 0.20 or 0.07
-        local x1, y1, z1 = world_to_screen(i, -1.0, -8)
-        local x2, y2, z2 = world_to_screen(i, -1.0,  8)
-        if z1 > 0 and z2 > 0 then
-            ig.dl_add_line(dl, x1, y1, x2, y2, 0.7, 0.7, 0.8, alpha, 1.0)
-        end
-        local x3, y3, z3 = world_to_screen(-8, -1.0, i)
-        local x4, y4, z4 = world_to_screen( 8, -1.0, i)
-        if z3 > 0 and z4 > 0 then
-            ig.dl_add_line(dl, x3, y3, x4, y4, 0.7, 0.7, 0.8, alpha, 1.0)
-        end
+        draw_line_3d(dl, i, -1.0, -8, i, -1.0, 8, 0.7, 0.7, 0.8, alpha, 1.0, cam_eye, cam_fwd, world_to_screen)
+        draw_line_3d(dl, -8, -1.0, i, 8, -1.0, i, 0.7, 0.7, 0.8, alpha, 1.0, cam_eye, cam_fwd, world_to_screen)
     end
 
     -- Render 3D Model Mesh

@@ -142,6 +142,50 @@ table.sort(sorted, function(a, b) return a.avg_z > b.avg_z end) -- far first
 for _, sf in ipairs(sorted) do
     -- draw sf.pts triangles, wireframe, gizmos
 end
+
+---
+
+## 3c. 3D Line & Grid Rendering: Camera Near-Plane Clipping Required
+
+In perspective projection, points behind the camera ($z_{cam} > 0$ or $w < 0$) invert their $X/Y$ coordinates when divided by $w$.
+
+❌ **WRONG** — projecting raw endpoints and testing `sz > 0`:
+```lua
+local x1, y1, z1 = world_to_screen(i, 0, -16)
+local x2, y2, z2 = world_to_screen(i, 0,  16)
+if z1 > 0 and z2 > 0 then
+    ig.dl_add_line(dl, x1, y1, x2, y2, ...)  -- Drops entire line when near ground!
+end
+```
+
+✅ **RIGHT** — clip line segments against the camera near plane in camera space before projecting:
+```lua
+-- See skill://imgui-recipes Section 9 for the complete draw_line_3d implementation
+draw_line_3d(dl, x1, y1, z1, x2, y2, z2, r, g, b, a, thick, cam_eye, cam_fwd, world_to_screen)
+```
+
+---
+
+## 3d. Toolbar Layout: Relative Flow Required
+
+❌ **NEVER** hardcode absolute horizontal pixel offsets (e.g. `ig.same_line(390)`) for sequential action buttons in toolbars or ribbons. Button label additions/translations will cause subsequent buttons to overlap.
+
+✅ **ALWAYS** use relative flow with `ig.same_line()` and visual separators (`|`):
+```lua
+if ig.button("+ Box") then ... end
+ig.same_line()
+if ig.button("+ Cylinder") then ... end
+ig.same_line()
+if ig.button("+ Wedge") then ... end
+ig.same_line()
+if ig.button("+ Stairs") then ... end
+ig.same_line()
+ig.text_colored("|", 0.35, 0.35, 0.4, 1.0)
+ig.same_line()
+if ig.button("Undo") then undo.do_undo() end
+ig.same_line()
+if ig.button("Redo") then undo.do_redo() end
+```
 ```
 ---
 
