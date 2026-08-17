@@ -139,23 +139,23 @@ function preview.frame(rect)
 
   -- keyboard zoom shortcuts when hovered
   if ig.is_window_hovered(0) then
-    -- '+' / '=' or 'Ctrl+=' -> Zoom In
-    if ig.is_key_pressed(46) or ig.is_key_pressed(87) then -- Key + or =
+    -- '+' / '=' -> Zoom In
+    if ig.key and (ig.is_key_pressed(ig.key.Equal) or (io.key_ctrl and ig.is_key_pressed(ig.key.Equal))) then
       st.zoom = "custom"
       st.zoom_val = clamp(scale * 1.25, 0.05, 64.0)
     end
-    -- '-' or 'Ctrl+-' -> Zoom Out
-    if ig.is_key_pressed(45) or ig.is_key_pressed(86) then -- Key -
+    -- '-' -> Zoom Out
+    if ig.key and (ig.is_key_pressed(ig.key.Minus) or (io.key_ctrl and ig.is_key_pressed(ig.key.Minus))) then
       st.zoom = "custom"
       st.zoom_val = clamp(scale * 0.80, 0.05, 64.0)
     end
     -- '0' or 'F' -> Fit to Viewport
-    if ig.is_key_pressed(39) or ig.is_key_pressed(9) then -- Key 0 or F
+    if ig.key and (ig.is_key_pressed(ig.key["0"]) or ig.is_key_pressed(ig.key.F)) then
       st.zoom = "fit"
       st.ox, st.oy = 0, 0
     end
     -- '1' -> 100% 1x Pixel Zoom
-    if ig.is_key_pressed(30) then -- Key 1
+    if ig.key and ig.is_key_pressed(ig.key["1"]) then
       st.zoom = "custom"
       st.zoom_val = 1.0
       st.ox, st.oy = 0, 0
@@ -178,7 +178,7 @@ function preview.frame(rect)
     end
 
     -- pan: middle drag, space+drag, or alt+drag
-    local is_space_drag = (io.key_alt or ig.is_key_down(44)) and ig.is_mouse_dragging(0)
+    local is_space_drag = (io.key_alt or (ig.key and ig.is_key_down(ig.key.Space))) and ig.is_mouse_dragging(0)
     local is_mid_drag = ig.is_mouse_dragging(2)
     if is_space_drag or is_mid_drag then
       st.zoom = "custom" -- Disengage "fit" mode on pan so offsets persist

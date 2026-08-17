@@ -1,12 +1,17 @@
--- doc.lua — Low-poly model and texture document state
+-- doc.lua — Low-poly model and texture document state with direct manipulation modes
 local doc = {
     name = "Character_Model",
     mesh = nil,
     texture = nil,
     tex_w = 256,
     tex_h = 256,
-    selected_face = 1,
-    mode = "model", -- "model" (edit geometry) or "paint" (3d/2d paint)
+    sel_mode = "face", -- "face", "vertex", "edge"
+    selected_face = 5,
+    selected_vert = nil,
+    selected_edge = nil,
+    action = nil, -- nil, "move", "extrude", "scale"
+    action_orig = nil,
+    action_delta = 0.0,
     brush_radius = 16.0,
     brush_hardness = 0.85,
     brush_color = { 0.85, 0.35, 0.25 },
@@ -35,11 +40,11 @@ function doc.mark_dirty()
 end
 
 function doc.snapshot()
-    -- Deep copy vertices and faces
     local snap = {
         name = doc.name,
+        sel_mode = doc.sel_mode,
         selected_face = doc.selected_face,
-        mode = doc.mode,
+        selected_vert = doc.selected_vert,
         mesh = { vertices = {}, faces = {} }
     }
     if doc.mesh then
@@ -61,8 +66,10 @@ end
 
 function doc.restore(snap)
     doc.name = snap.name
+    doc.sel_mode = snap.sel_mode or "face"
     doc.selected_face = snap.selected_face
-    doc.mode = snap.mode
+    doc.selected_vert = snap.selected_vert
+    doc.action = nil
     doc.mesh = { vertices = {}, faces = {} }
     for i, v in ipairs(snap.mesh.vertices) do
         doc.mesh.vertices[i] = {

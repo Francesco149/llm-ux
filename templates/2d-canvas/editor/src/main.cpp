@@ -4,6 +4,7 @@
 //   texturewrangler --test           → headless Lua test suite (no window)
 //   texturewrangler --shot <png> [--frames N] → render UI headless, capture
 #include "editor.h"
+#include <imgui.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -48,14 +49,17 @@ static const char* find_lua_dir(const char* argv0) {
 }
 
 int main(int argc, char** argv) {
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO();
+  io.DisplaySize = ImVec2(1280, 800);
+
   if (has_arg(argc, argv, "--test")) {
-    // headless: no SDL, no window. testmain.lua runs the suite and calls
-    // os.exit(code) with the pass/fail result.
     lua_init(find_lua_dir(argv[0]), argc, argv);
     lua_shutdown();
+    ImGui::DestroyContext();
     return 0;
   }
-
   if (has_arg(argc, argv, "--shot")) {
     // headless screenshot: offscreen SDL driver, no window stealing
 #ifdef _WIN32

@@ -1,5 +1,6 @@
-// main.cpp — CLI argument parsing and mode dispatch for godot-blockout
+// main.cpp — CLI argument parsing and mode dispatch for lowpoly-painter
 #include "editor.h"
+#include <imgui.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -24,7 +25,7 @@ static const char* find_lua_dir(const char* argv0) {
         snprintf(dir, sizeof(dir), "%s", c);
         if (file_exists(path_join(c, "main.lua"))) return dir;
     }
-    const char* root = getenv("GB_ROOT");
+    const char* root = getenv("LP_ROOT");
     if (root) {
         snprintf(dir, sizeof(dir), "%s/editor/lua", root);
         if (file_exists(path_join(dir, "main.lua"))) return dir;
@@ -34,6 +35,18 @@ static const char* find_lua_dir(const char* argv0) {
 }
 
 int main(int argc, char** argv) {
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(1280, 800);
+
+    if (has_arg(argc, argv, "--test")) {
+        lua_init(find_lua_dir(argv[0]), argc, argv);
+        lua_shutdown();
+        ImGui::DestroyContext();
+        return 0;
+    }
+
     if (has_arg(argc, argv, "--shot")) {
 #ifdef _WIN32
         _putenv("SDL_VIDEODRIVER=offscreen");

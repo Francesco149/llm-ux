@@ -1,4 +1,4 @@
--- panels.lua — Tiled UI layout for lowpoly-painter
+-- panels.lua — Tiled UI layout with direct manipulation controls for lowpoly-painter
 local panels = {}
 local ig = lp.ig
 local doc = require("doc")
@@ -11,7 +11,7 @@ local export = require("export")
 local undo = require("undo")
 local preview = require("preview")
 
-panels.left_w = 240
+panels.left_w = 230
 panels.right_w = 290
 local TOP_H = 36
 
@@ -32,18 +32,23 @@ function panels.render()
         ig.text_colored("lowpoly-painter", theme.accent[1], theme.accent[2], theme.accent[3], 1.0)
 
         ig.same_line(140)
+        -- Mode Selection Pills
+        if ig.selectable("1 Vert", doc.sel_mode == "vertex", 0, 50, 24) then doc.sel_mode = "vertex" end
+        ui.tooltip("Vertex Selection Mode", "1", "Select individual vertices in 3D")
+
+        ig.same_line()
+        if ig.selectable("2 Edge", doc.sel_mode == "edge", 0, 50, 24) then doc.sel_mode = "edge" end
+        ui.tooltip("Edge Selection Mode", "2", "Select mesh edges in 3D")
+
+        ig.same_line()
+        if ig.selectable("3 Face", doc.sel_mode == "face", 0, 50, 24) then doc.sel_mode = "face" end
+        ui.tooltip("Face Selection Mode", "3", "Select polygon faces in 3D")
+
+        ig.same_line(320)
         if ig.button("+ Cube") then
             doc.mutate(function() doc.mesh = mesh.create_cube(2, 2, 2) end, "New Cube")
         end
-        ui.tooltip("New Cube Primitive", nil, "Spawns a 2x2 low-poly cube")
-
-        ig.same_line()
-        if ig.button("Extrude Face") then
-            if doc.mesh and doc.selected_face then
-                doc.mutate(function() mesh.extrude_face(doc.mesh, doc.selected_face, 1.0) end, "Extrude Face")
-            end
-        end
-        ui.tooltip("Extrude Face", "E", "Extrudes selected face along normal")
+        ui.tooltip("New Cube", nil, "Creates 2x2 low-poly cube")
 
         ig.same_line()
         if ig.button("Auto UVs") then
@@ -53,7 +58,7 @@ function panels.render()
         end
         ui.tooltip("Auto Unwrap UVs", "U", "Automatically packs face UV islands")
 
-        ig.same_line(380)
+        ig.same_line(460)
         if ig.button("Undo") then undo.do_undo() end
         ui.tooltip("Undo", "Ctrl+Z", "Revert last change")
 
@@ -73,12 +78,12 @@ function panels.render()
 
     local body_h = dh - TOP_H
 
-    -- ── 2. Left Panel: Face Hierarchy ────────────────────────────────────────
+    -- ── 2. Left Panel: Face / Mesh Hierarchy ─────────────────────────────────
     ig.set_next_window_pos(0, TOP_H)
     ig.set_next_window_size(panels.left_w, body_h)
     if ig.begin_child("##left_panel", panels.left_w, body_h, 0, 0) then
         ig.set_cursor_pos(8, 6)
-        ig.text("Mesh Faces")
+        ig.text("Mesh Hierarchy")
         ig.separator()
 
         if doc.mesh then
@@ -94,15 +99,22 @@ function panels.render()
     end
     ig.end_child()
 
-    -- ── 3. Right Panel: Painting & Shading Inspector ─────────────────────────
+    -- ── 3. Right Panel: Shading & Texture Controls ───────────────────────────
     local rx = dw - panels.right_w
     ig.set_next_window_pos(rx, TOP_H)
     ig.set_next_window_size(panels.right_w, body_h)
     if ig.begin_child("##right_panel", panels.right_w, body_h, 0, 0) then
         ig.set_cursor_pos(8, 6)
-        ig.text("Paint & Bake Controls")
+        ig.text("Paint & Shading")
         ig.separator()
 
+        ig.text("Direct Hotkeys:")
+        ig.text_colored("  [G] Grab / Move Face", 0.7, 0.75, 0.85, 1.0)
+        ig.text_colored("  [E] Extrude Face Normal", 0.7, 0.75, 0.85, 1.0)
+        ig.text_colored("  [S] Scale Face", 0.7, 0.75, 0.85, 1.0)
+        ig.text_colored("  [F] Focus Camera", 0.7, 0.75, 0.85, 1.0)
+
+        ig.separator()
         ig.text("Brush Settings:")
         ui.undoable_slider_float("Radius", doc.brush_radius, 1.0, 64.0, function(v)
             doc.brush_radius = v
@@ -112,8 +124,7 @@ function panels.render()
         end)
 
         ig.spacing()
-        ig.text("Brush Color:")
-        ui.undoable_color3("Color", doc.brush_color, function(c)
+        ui.undoable_color3("Brush Color", doc.brush_color, function(c)
             doc.brush_color = c
         end)
 
@@ -130,14 +141,6 @@ function panels.render()
             local b = math.floor(doc.brush_color[3] * 255)
             lp.tex.clear(doc.texture, (r << 24) | (g << 16) | (b << 8) | 0xFF)
             doc.mark_dirty()
-        end
-
-        ig.separator()
-        ig.text("Operations:")
-        if ig.button("Extrude Face # " .. tostring(doc.selected_face), panels.right_w - 24, 28) then
-            if doc.mesh and doc.selected_face then
-                doc.mutate(function() mesh.extrude_face(doc.mesh, doc.selected_face, 1.0) end, "Extrude")
-            end
         end
     end
     ig.end_child()

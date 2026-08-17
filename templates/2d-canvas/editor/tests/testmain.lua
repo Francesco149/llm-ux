@@ -19,7 +19,7 @@ end
 
 local ok, err = pcall(function()
   local suites = { "test_json", "test_kernels", "test_doc", "test_composite",
-                   "test_golden" }
+                   "test_golden", "test_ui_smoke" }
   for _, s in ipairs(suites) do
     local m = require(s)
     local t = require("testlib")

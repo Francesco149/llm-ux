@@ -669,6 +669,10 @@ static int l_get_mouse_drag_delta(lua_State* L) {
   push_v2(L, d);
   return 2;
 }
+static int l_reset_mouse_drag_delta(lua_State* L) {
+  ImGui::ResetMouseDragDelta((ImGuiMouseButton)luaL_optinteger(L, 1, 0));
+  return 0;
+}
 static int l_get_content_region_avail(lua_State* L) {
   push_v2(L, ImGui::GetContentRegionAvail());
   return 2;
@@ -878,6 +882,7 @@ void ig_register(lua_State* L) {
   REG(set_next_window_size);
   REG(is_item_clicked);
   REG(is_item_active);
+  REG(reset_mouse_drag_delta);
   REG(is_item_hovered);
   REG(is_item_edited);
   REG(is_item_deactivated_after_edit);
