@@ -32,11 +32,11 @@ WIN_CC   := $(MINGW_CC)
 
 WIN_CXXFLAGS := $(CXXFLAGS_COMMON) -DWINVER=0x0601 -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE \
   -I $(SDL3_CROSS_INC)
-WIN_LDFLAGS  := -static-libgcc -static-libstdc++ -mconsole
+WIN_LDFLAGS  := -static-libgcc -static-libstdc++ -mwindows
 WIN_LIBS := -L$(SDL3_CROSS_LIB) -lSDL3 \
   -Wl,-Bstatic -lmcfgthread -Wl,-Bdynamic \
   -lgdi32 -limm32 -lole32 -loleaut32 -lversion -lwinmm -luuid -ldxgi -ld3d11 \
-  -lsetupapi -lcomdlg32 -lshell32 -luser32 -lkernel32
+  -lsetupapi -lcomdlg32 -lshell32 -luser32 -lkernel32 -latomic
 
 win: $(OUT)
 $(OUT): $(OBJ_CXX) $(OBJ_LUA) | $(BUILD)

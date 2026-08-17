@@ -6,6 +6,7 @@
 #include <cstring>
 #include <chrono>
 #include <thread>
+#include <algorithm>
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
@@ -15,6 +16,8 @@
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlrenderer3.h>
+
+#include <fonts_embedded.h>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "vendor/stb/stb_image_write.h"
@@ -153,10 +156,26 @@ int app_main(int argc, char** argv) {
         return 1;
     }
 
+    if (!getenv("LP_SHOT")) {
+        SDL_SetRenderVSync(g_renderer, 1);
+    }
+
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    // Embedded Vector Fonts
+    {
+        ImFontConfig cfg;
+        cfg.OversampleH = cfg.OversampleV = 2;
+        cfg.PixelSnapH = true;
+        cfg.FontDataOwnedByAtlas = false;
+        io.Fonts->AddFontFromMemoryTTF((void*)font_ui, font_ui_len, 16.0f, &cfg);
+        io.Fonts->AddFontFromMemoryTTF((void*)font_ui, font_ui_len, 20.0f, &cfg);
+        io.Fonts->AddFontFromMemoryTTF((void*)font_mono, font_mono_len, 14.0f, &cfg);
+    }
 
     ImGui_ImplSDL3_InitForSDLRenderer(g_window, g_renderer);
     ImGui_ImplSDLRenderer3_Init(g_renderer);
@@ -175,6 +194,8 @@ int app_main(int argc, char** argv) {
         ImGui_ImplSDL3_NewFrame();
         ImGui::NewFrame();
 
+        io.DeltaTime = std::min(io.DeltaTime, 0.05f);
+
         // Run Lua UI pass
         lua_frame();
 
@@ -188,9 +209,13 @@ int app_main(int argc, char** argv) {
         if (shot_path && frame_count >= shot_frames) {
             SDL_Surface* surf = SDL_RenderReadPixels(g_renderer, nullptr);
             if (surf) {
-                stbi_write_png(shot_path, surf->w, surf->h, 4, surf->pixels, surf->pitch);
-                app_log("Screenshot saved to %s", shot_path);
+                SDL_Surface* conv = SDL_ConvertSurface(surf, SDL_PIXELFORMAT_RGBA32);
                 SDL_DestroySurface(surf);
+                if (conv) {
+                    stbi_write_png(shot_path, conv->w, conv->h, 4, conv->pixels, conv->pitch);
+                    app_log("Screenshot saved to %s", shot_path);
+                    SDL_DestroySurface(conv);
+                }
             }
             g_running = false;
         }

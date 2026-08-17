@@ -18,6 +18,17 @@ function undo.push(desc)
     undo.redo_stack = {}
 end
 
+function undo.push_state(desc, snap)
+    undo.stack[#undo.stack + 1] = {
+        desc = desc or "Edit",
+        state = snap,
+    }
+    if #undo.stack > undo.max_depth then
+        table.remove(undo.stack, 1)
+    end
+    undo.redo_stack = {}
+end
+
 function undo.do_undo()
     if #undo.stack == 0 then return end
     local entry = table.remove(undo.stack)

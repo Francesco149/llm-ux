@@ -258,4 +258,80 @@ function ui.context_menu(menu_id, items)
         ig.end_popup()
     end
 end
+
+---
+
+## 6. Direct Manipulation Modal Transform State Machine (Blender/Figma Standard)
+
+Eliminates clunky button-based manipulation by handling hotkey triggers, live mouse pulling, and commit/cancel states:
+
+```lua
+-- In preview.lua / tool state machine
+local modal = {
+    action = nil, -- nil, "extrude", "move", "scale"
+    orig_state = nil,
+    drag_start = nil,
+}
+
+function modal.handle_triggers(doc, is_hovered, mx, my)
+    if not is_hovered or modal.action or not doc.selected_face then return end
+    local io = ig.get_io()
+    if io.want_text_input then return end
+
+    -- 'E' -> Extrude Face
+    if ig.key and ig.is_key_pressed(ig.key.E) and not io.key_ctrl then
+        modal.action = "extrude"
+        modal.orig_state = doc.snapshot() -- Capture PRE-ACTION state
+        modal.drag_start = { mx, my }
+        mesh.extrude_face(doc.mesh, doc.selected_face, 0.0) -- Start extrusion at 0
+    end
+
+    -- 'G' -> Grab / Move Selection
+    if ig.key and ig.is_key_pressed(ig.key.G) then
+        modal.action = "move"
+        modal.orig_state = doc.snapshot()
+        modal.drag_start = { mx, my }
+    end
+end
+
+function modal.update_and_render_hud(doc, undo, mx, my, avail_w, avail_h, x0, y0)
+    if not modal.action then return end
+    local io = ig.get_io()
+    local dl = ig.get_window_draw_list()
+
+    -- Apply real-time transformation from mouse motion
+    local start_m = modal.drag_start or { mx, my }
+    local dy = (start_m[2] - my) * 0.02
+    if modal.action == "extrude" and doc.mesh and doc.selected_face then
+        -- Pull face along normal in real-time
+        mesh.set_extrude_distance(doc.mesh, doc.selected_face, modal.orig_state, dy)
+    end
+
+    -- Confirm on Left-Click / Enter
+    if ig.is_mouse_clicked(0) or (ig.key and ig.is_key_pressed(ig.key.Enter)) then
+        undo.push_state(modal.action:upper() .. " Face", modal.orig_state)
+        modal.action = nil
+        modal.orig_state = nil
+        doc.mark_dirty()
+    end
+
+    -- Cancel on Right-Click / Escape
+    if ig.is_mouse_clicked(1) or (ig.key and ig.is_key_pressed(ig.key.Escape)) then
+        doc.restore(modal.orig_state)
+        modal.action = nil
+        modal.orig_state = nil
+    end
+
+    -- Render In-Flight Floating HUD Status Badge
+    if modal.action then
+        local hud_text = string.format("%s: %+.2fm  |  LClick/Enter: Confirm  ·  RClick/Esc: Cancel",
+            modal.action:upper(), dy)
+        local tw = ig.calc_text_size(hud_text)
+        local hx = x0 + (avail_w - tw) * 0.5
+        local hy = y0 + 16.0
+        ig.dl_add_rect_filled(dl, hx - 12, hy - 4, hx + tw + 12, hy + 24, 0.12, 0.13, 0.16, 0.95)
+        ig.dl_add_text(dl, hx, hy, 0.96, 0.62, 0.04, 1.0, hud_text)
+    end
+end
+```
 ```

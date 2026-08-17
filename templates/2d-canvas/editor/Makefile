@@ -47,7 +47,7 @@ WIN_CC   := $(MINGW_CC)
 
 WIN_CXXFLAGS := $(CXXFLAGS_COMMON) -DWINVER=0x0601 -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE \
   -I $(SDL3_CROSS_INC)
-WIN_LDFLAGS  := -static-libgcc -static-libstdc++ -mconsole
+WIN_LDFLAGS  := -static-libgcc -static-libstdc++ -mwindows
 # SDL3 cross import lib + the Win32 libs SDL3's .dll.a references
 # (-Wl,-Bstatic -lmcfgthread: mingw's pthread runtime linked in, so the
 # exe needs no libmcfgthread-2.dll on the target)

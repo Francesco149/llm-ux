@@ -328,10 +328,14 @@ end
 function doc.save()
   if not doc.path then return false end
   tw.file.mkdirs(doc.path)
-  local ok = tw.file.write_text(doc.path .. "/project.json",
-                                json.encode(doc.serialize()))
-  doc.dirty = false
-  -- thumbnail for the picker (64px, cheap)
+  local tmp_path = doc.path .. "/project.json.tmp"
+  local target_path = doc.path .. "/project.json"
+  local ok = tw.file.write_text(tmp_path, json.encode(doc.serialize()))
+  if ok then
+    os.remove(target_path)
+    os.rename(tmp_path, target_path)
+    doc.dirty = false
+  end
   pcall(function()
     local img = render.composite(nil, doc.canvas, doc._cache)
     if img then

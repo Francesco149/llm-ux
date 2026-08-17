@@ -156,8 +156,11 @@ function preview.frame(rect)
 
         -- Confirm on Left-Click / Enter / Space
         if ig.is_mouse_clicked(0) or (ig.key and ig.is_key_pressed(ig.key.Enter)) then
-            undo.push(doc.action:upper() .. " Face")
+            if undo and doc.action_orig then
+                undo.push_state(doc.action:upper() .. " Face", doc.action_orig)
+            end
             doc.action = nil
+            doc.action_orig = nil
             preview.cam.drag_start_mouse = nil
             doc.mark_dirty()
         end

@@ -175,8 +175,9 @@ static int l_app_log(lua_State* L) {
     app_log("%s", msg);
     return 0;
 }
+
+void ig_clear_draw_lists();
 void ig_register(lua_State* L);
-void register_ig_bindings(lua_State* L);
 
 void lua_init(const char* root_dir, int argc, char** argv) {
     snprintf(lua_dir_path, sizeof(lua_dir_path), "%s", root_dir);
@@ -251,8 +252,8 @@ void lua_init(const char* root_dir, int argc, char** argv) {
 }
 
 void lua_frame() {
+    ig_clear_draw_lists();
     if (!L_global) return;
-    lua_getglobal(L_global, "lp_frame");
     if (lua_isfunction(L_global, -1)) {
         if (lua_pcall(L_global, 0, 0, 0) != LUA_OK) {
             app_log("[LUA RUNTIME ERROR] %s", lua_tostring(L_global, -1));

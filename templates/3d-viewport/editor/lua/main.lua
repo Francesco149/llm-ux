@@ -28,11 +28,6 @@ function lp_frame()
     if io.key_ctrl and ig.is_key_pressed(ig.key.E) then
         export.save_obj("build/" .. doc.name .. ".obj")
     end
-    if ig.is_key_pressed(ig.key.E) and not io.key_ctrl then
-        if doc.mesh and doc.selected_face then
-            doc.mutate(function() mesh.extrude_face(doc.mesh, doc.selected_face, 1.0) end, "Extrude")
-        end
-    end
 
     autosave.tick()
     panels.render()

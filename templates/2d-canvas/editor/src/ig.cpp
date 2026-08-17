@@ -460,6 +460,10 @@ static int push_dl(lua_State* L, ImDrawList* dl) {
   luaL_setmetatable(L, DL_MT);
   return 1;
 }
+void ig_clear_draw_lists() {
+  g_dl.clear();
+}
+
 static int l_get_window_draw_list(lua_State* L) {
   return push_dl(L, ImGui::GetWindowDrawList());
 }
@@ -751,12 +755,19 @@ static int l_pop_id(lua_State* L) {
   return 0;
 }
 static int l_is_key_pressed(lua_State* L) {
-  lua_pushboolean(L, ImGui::IsKeyPressed((ImGuiKey)luaL_checkinteger(L, 1),
-                                         opt_bool(L, 2, false)));
+  ImGuiKey key = (ImGuiKey)luaL_checkinteger(L, 1);
+  if (key < ImGuiKey_NamedKey_BEGIN || key >= ImGuiKey_NamedKey_END) {
+    return luaL_error(L, "is_key_pressed: %d is not a valid ImGuiKey (use ig.key.* constants)", (int)key);
+  }
+  lua_pushboolean(L, ImGui::IsKeyPressed(key, opt_bool(L, 2, false)));
   return 1;
 }
 static int l_is_key_down(lua_State* L) {
-  lua_pushboolean(L, ImGui::IsKeyDown((ImGuiKey)luaL_checkinteger(L, 1)));
+  ImGuiKey key = (ImGuiKey)luaL_checkinteger(L, 1);
+  if (key < ImGuiKey_NamedKey_BEGIN || key >= ImGuiKey_NamedKey_END) {
+    return luaL_error(L, "is_key_down: %d is not a valid ImGuiKey (use ig.key.* constants)", (int)key);
+  }
+  lua_pushboolean(L, ImGui::IsKeyDown(key));
   return 1;
 }
 static int l_get_io(lua_State* L) {
