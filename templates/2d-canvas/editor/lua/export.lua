@@ -4,6 +4,17 @@
 -- Exporting the final composite never needs an export layer (implicit top).
 
 local export = {}
+export.target_layer = nil
+
+function export.on_folder_picked(path)
+  if export.target_layer and export.target_layer.params then
+    doc.mutate(function()
+      export.target_layer.params.dest_path = path
+    end, "Set Export Destination")
+    export.target_layer = nil
+  end
+end
+
 
 local function sanitize(name)
   return (name:gsub('[^%w%._-]', "_"))

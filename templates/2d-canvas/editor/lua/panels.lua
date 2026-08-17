@@ -202,16 +202,20 @@ function panels.toolbar(rect)
     if ig.is_item_hovered() then
       ig.begin_tooltip(); ig.text("Project Settings & Canvas Size"); ig.end_tooltip()
     end
-    -- right side: status info (aligned with the button text baseline)
+    -- right side: status info in an isolated fixed-width right slot with monospace font
     local io = ig.get_io()
-    local fps = io.delta_time > 0 and math.floor(1 / io.delta_time) or 0
-    local sz = string.format("%d×%d", doc.canvas[1], doc.canvas[2])
-    local info = sz .. "  ·  " .. fps .. " fps  ·  comp " ..
-                 string.format("%.1f", perf.comp_ms) .. " ms"
-    local tw_ = ig.calc_text_size(info)
-    ig.set_cursor_pos(rect.w - tw_ - 14, 9)
+    local cur_fps = io.delta_time > 0 and (1.0 / io.delta_time) or 60.0
+    if not panels.state.avg_fps then panels.state.avg_fps = cur_fps end
+    panels.state.avg_fps = panels.state.avg_fps + (cur_fps - panels.state.avg_fps) * 0.05
+    local disp_fps = math.floor(panels.state.avg_fps + 0.5)
+
+    local info = string.format("%d×%d · %2dfps · comp %4.1fms",
+                               doc.canvas[1], doc.canvas[2], disp_fps, perf.comp_ms)
+    local stat_box_w = 230
+    ig.set_cursor_pos(math.max(340, rect.w - stat_box_w - 12), 9)
+    ig.push_font(1) -- JetBrains Mono: fixed character widths prevent text vibration
     ig.text_colored(info, 0.45, 0.47, 0.52, 1)
-  else
+    ig.pop_font()
     ig.push_font(1)
     ig.text("texturewrangler")
     ig.pop_font()

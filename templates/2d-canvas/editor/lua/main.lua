@@ -61,6 +61,12 @@ end
 function tw.on_drop(path)
   if path then import.file(path) end
 end
+function tw.on_folder_picked(path)
+  if path and export and export.on_folder_picked then
+    export.on_folder_picked(path)
+  end
+end
+
 
 -- console helper: reload the whole Lua side without restarting
 function tw.reload()

@@ -187,6 +187,38 @@ ig.same_line()
 if ig.button("Redo") then undo.do_redo() end
 ```
 ```
+
+---
+
+## 3e. Numeric Counters, FPS Readouts, & Monospace Isolation
+
+❌ **NEVER** place fluctuating numeric readouts (FPS, frame times, dimensions) in variable-pitch proportional fonts right next to other dynamic widgets without fixed-width isolation. As the numbers change width each frame, surrounding elements jitter and vibrate visually.
+
+✅ **ALWAYS** isolate numeric meters:
+1. Use fixed-width / monospace font (`JetBrains Mono`).
+2. Position in a dedicated fixed-width slot or right-aligned anchor.
+3. Smooth high-frequency counters (e.g. FPS) with an exponential moving average:
+```lua
+local cur_fps = io.delta_time > 0 and (1.0 / io.delta_time) or 60.0
+avg_fps = avg_fps + (cur_fps - avg_fps) * 0.05
+local info = string.format("%d×%d · %2dfps · comp %4.1fms", w, h, math.floor(avg_fps + 0.5), comp_ms)
+ig.set_cursor_pos(rect.w - 240, 9)
+ig.push_font(1) -- JetBrains Mono
+ig.text_colored(info, 0.45, 0.47, 0.52, 1)
+ig.pop_font()
+```
+
+---
+
+## 3f. 3D Raycast Face Picking & Front-Face Culling
+
+❌ **NEVER** pick 3D faces using 2D screen-space point-in-triangle or arbitrary vertex depth (`v0.z`). On convex or overlapping meshes, back faces will frequently be picked over front faces.
+
+✅ **ALWAYS** use 3D unprojected raycasting with front-face normal validation:
+1. Unproject mouse coordinate $(mx, my)$ into a 3D world ray $(origin, dir)$.
+2. Cull backfaces: skip any face where $Normal \cdot RayDir \ge 0$.
+3. Test front-facing triangles with Möller–Trumbore ray-triangle intersection.
+4. Select the face with minimum positive ray distance ($t > 0$).
 ---
 
 ## 4. ImGui Visual Ergonomics & Theme Aesthetics

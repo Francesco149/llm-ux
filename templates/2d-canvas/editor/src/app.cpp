@@ -327,6 +327,28 @@ static int l_app_open_file_dialog(lua_State* L) {
   lua_pushboolean(L, 1);
   return 1;
 }
+static void folder_dialog_cb(void* userdata, const char* const* files, int filter) {
+  (void)filter;
+  if (files && files[0]) call_lua_void("on_folder_picked", files[0]);
+  SDL_free(userdata);
+}
+
+static int l_app_open_folder_dialog(lua_State* L) {
+  const char* default_loc = luaL_optstring(L, 1, nullptr);
+  DlgCtx* ctx = (DlgCtx*)SDL_malloc(sizeof(DlgCtx));
+  ctx->path[0] = 0;
+  SDL_ClearError();
+  SDL_ShowOpenFolderDialog(folder_dialog_cb, ctx, g_window, default_loc, false);
+  const char* err = SDL_GetError();
+  if (err && err[0]) {
+    app_log("native folder dialog unavailable: %s", err);
+    lua_pushboolean(L, 0);
+    return 1;
+  }
+  lua_pushboolean(L, 1);
+  return 1;
+}
+
 
 // tw.app.open_folder(path) — reveal a directory in the OS file manager
 static int l_app_open_folder(lua_State* L) {
@@ -369,6 +391,8 @@ void app_register(lua_State* L) {
   lua_setfield(L, -2, "eval");
   lua_pushcfunction(L, l_app_open_file_dialog);
   lua_setfield(L, -2, "open_file_dialog");
+  lua_pushcfunction(L, l_app_open_folder_dialog);
+  lua_setfield(L, -2, "open_folder_dialog");
   lua_pushcfunction(L, l_app_open_folder);
   lua_setfield(L, -2, "open_folder");
   lua_setfield(L, -2, "app");

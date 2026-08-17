@@ -42,20 +42,22 @@ function panel.frame()
     coalesce = function(fn) doc.coalesce_mutate(fn) end,
   })
 
-  -- common controls
+  -- common controls (skip visual blend/opacity controls for non-visual export capture layers)
   u.input("Name", l.name, function(v)
     l.name = v == "" and doc.type_names[l.type] or v
   end)
-  u.check("Visible", l.visible, function(v) l.visible = v end)
-  u.slider("Opacity", l.opacity, 0, 1, function(v) l.opacity = v end)
-  u.combo("Blend", blend_items(), blend_index(l.blend), function(v)
-    l.blend = BLENDS[v]
-  end)
-  if l.blend == "alphamask" then
-    u.combo("Mask scope", { "Layer below", "Whole composite" },
-            l.params.scope == "below" and 1 or 2, function(v)
-      l.params.scope = v == 1 and "below" or "composite"
+  if l.type ~= "export" then
+    u.check("Visible", l.visible, function(v) l.visible = v end)
+    u.slider("Opacity", l.opacity, 0, 1, function(v) l.opacity = v end)
+    u.combo("Blend", blend_items(), blend_index(l.blend), function(v)
+      l.blend = BLENDS[v]
     end)
+    if l.blend == "alphamask" then
+      u.combo("Mask scope", { "Layer below", "Whole composite" },
+              l.params.scope == "below" and 1 or 2, function(v)
+        l.params.scope = v == 1 and "below" or "composite"
+      end)
+    end
   end
   u.separator()
 

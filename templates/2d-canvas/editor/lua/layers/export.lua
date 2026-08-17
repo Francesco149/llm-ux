@@ -17,8 +17,9 @@ function M.panel(l, ui)
   -- Output folder path + browse button
   ui.input("Destination", p.dest_path or "", function(v) p.dest_path = v end)
   if ig.button("Choose Folder...") then
-    if tw.app and tw.app.open_file_dialog then
-      tw.app.open_file_dialog()
+    export.target_layer = l
+    if tw.app and tw.app.open_folder_dialog then
+      tw.app.open_folder_dialog(p.dest_path)
     end
   end
   ui.tooltip("Browse Destination Folder", nil, "Pick target export directory")
