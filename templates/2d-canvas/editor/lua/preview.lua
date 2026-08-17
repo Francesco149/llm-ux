@@ -1,0 +1,248 @@
+-- preview.lua — the main canvas: composite preview with 4×4 tiling
+-- (toggleable), checkerboard transparency, zoom (fit/1×/2×/4×/ctrl+wheel),
+-- alt-drag pan, and paint input when the selected layer is a paint layer.
+-- View mode: Final | At layer | Layer only.
+
+local preview = {}
+local ig = tw.ig
+
+preview.state = {
+  mode = "final", -- "final" | "at" | "layer"
+  tiles = 2, -- 1×1 / 2×2 / 4×4 tiling (default 2×2)
+  zoom = "fit", -- "fit" or pixel zoom factor
+  zoom_val = 1,
+  ox = 0,
+  oy = 0,
+}
+
+local cb_texid = nil
+
+local function checkerboard()
+  if cb_texid then return cb_texid end
+  local img = tw.tex.new(16, 16, { r = 60, g = 62, b = 68, a = 255 })
+  for y = 0, 15 do
+    for x = 0, 15 do
+      local on = ((math.floor(x / 8) + math.floor(y / 8)) % 2) == 0
+      local v = on and 52 or 72
+      tw.tex.set(img, x, y, v, v, v, 255)
+    end
+  end
+  cb_texid = tw.gfx.register(img)
+  return cb_texid
+end
+
+-- the image to display for the current mode + selection
+local function view_image()
+  local sel = panels.selected()
+  if preview.state.mode == "layer" and sel then
+    return render.layer_only(sel, doc.canvas), nil
+  elseif preview.state.mode == "at" and sel then
+    local idx = doc.stack_index(sel)
+    if idx then return render.composite(idx, doc.canvas, doc._cache), idx end
+  end
+  return render.composite(nil, doc.canvas, doc._cache), nil
+end
+
+local function clamp(v, min_v, max_v)
+  return math.max(min_v, math.min(max_v, v))
+end
+
+local function zoom_fit(avail_w, avail_h, img_w, img_h)
+  local n = preview.state.tiles or 2
+  local s = math.min(avail_w / (img_w * n), avail_h / (img_h * n))
+  return math.max(0.01, s)
+end
+
+function preview.frame(rect)
+  local img, cache_idx = view_image()
+  if not img then
+    img = tw.tex.new(64, 64, { r = 0, g = 0, b = 0, a = 0 })
+  end
+  local w, h = tw.tex.size(img)
+  local texid
+  if preview.state.mode == "layer" then
+    texid = preview.state.texid
+    if not texid then
+      texid = tw.gfx.register(img)
+      preview.state.texid = texid
+    else
+      texid = tw.gfx.update(texid, img)
+    end
+    preview.state.texid = texid
+  else
+    -- final/at: the composite is cached per layer; texid lives in the cache
+    local list = doc.layers
+    local last = cache_idx or #list
+    local l = last >= 1 and list[last] or nil
+    texid = l and render.texid_for(doc._cache, l.id, img) or nil
+    if not texid then
+      texid = preview.state.texid
+      if not texid then
+        texid = tw.gfx.register(img)
+      else
+        texid = tw.gfx.update(texid, img)
+      end
+      preview.state.texid = texid
+    end
+  end
+
+  -- header row
+  ig.set_cursor_pos(0, 30)
+  local modes = { "Final", "At layer", "Layer only" }
+  local mode_idx = ({ final = 1, at = 2, layer = 3 })[preview.state.mode]
+  local changed, mi = ig.combo("##mode", modes, mode_idx - 1)
+  if changed then
+    preview.state.mode = ({ "final", "at", "layer" })[mi + 1]
+  end
+  ig.same_line()
+  local tiles_opts = { "1×1", "2×2", "4×4" }
+  local ti = ({ [1] = 1, [2] = 2, [4] = 3 })[preview.state.tiles] or 2
+  local tch, tnew = ig.combo("##tiles", tiles_opts, ti - 1)
+  if tch then preview.state.tiles = ({ 1, 2, 4 })[tnew + 1] end
+  ig.same_line()
+  local zooms = { "Fit", "1×", "2×", "4×" }
+  local zi = ({ fit = 1, ["1"] = 2, ["2"] = 3, ["4"] = 4 })[preview.state.zoom] or 1
+  local zch, znew = ig.combo("##zoom", zooms, zi - 1)
+  if zch then
+    preview.state.zoom = ({ "fit", "1", "2", "4" })[znew + 1]
+    preview.state.zoom_val = ({ 0, 1, 2, 4 })[znew + 1]
+  end
+  -- right-aligned info on the header row. Compact: size only (the view mode
+  -- is already visible in the mode combo). Skipped when the panel is too
+  -- narrow — a long "1024×1024 · final" used to overlap the zoom combo.
+  local info = string.format("%d×%d", w, h)
+  local itw = ig.calc_text_size(info)
+  local avail = ig.get_content_region_avail()
+  if avail - itw > 120 then
+    ig.same_line(avail - itw - 8)
+    ig.text_colored(info, 0.45, 0.47, 0.52, 1)
+  end
+
+  -- content area below the header
+  local cw, ch = ig.get_content_region_avail()
+  local x0, y0 = ig.get_cursor_screen_pos()
+  local avail_w, avail_h = cw - 8, ch - 8
+
+  -- zoom + pan state
+  local io = ig.get_io()
+  local st = preview.state
+  local scale
+  if st.zoom == "fit" then
+    scale = zoom_fit(avail_w, avail_h, w, h)
+    st.zoom_val = scale
+    st.ox, st.oy = 0, 0
+  else
+    scale = st.zoom_val or 1.0
+  end
+  local n = st.tiles or 2
+  local img_w, img_h = w * n * scale, h * n * scale
+
+  -- keyboard zoom shortcuts when hovered
+  if ig.is_window_hovered(0) then
+    -- '+' / '=' or 'Ctrl+=' -> Zoom In
+    if ig.is_key_pressed(46) or ig.is_key_pressed(87) then -- Key + or =
+      st.zoom = "custom"
+      st.zoom_val = clamp(scale * 1.25, 0.05, 64.0)
+    end
+    -- '-' or 'Ctrl+-' -> Zoom Out
+    if ig.is_key_pressed(45) or ig.is_key_pressed(86) then -- Key -
+      st.zoom = "custom"
+      st.zoom_val = clamp(scale * 0.80, 0.05, 64.0)
+    end
+    -- '0' or 'F' -> Fit to Viewport
+    if ig.is_key_pressed(39) or ig.is_key_pressed(9) then -- Key 0 or F
+      st.zoom = "fit"
+      st.ox, st.oy = 0, 0
+    end
+    -- '1' -> 100% 1x Pixel Zoom
+    if ig.is_key_pressed(30) then -- Key 1
+      st.zoom = "custom"
+      st.zoom_val = 1.0
+      st.ox, st.oy = 0, 0
+    end
+
+    -- bare wheel zoom at cursor (anchored on cursor world point)
+    if io.mouse_wheel ~= 0 then
+      local mx, my = ig.get_mouse_pos()
+      local old_scale = scale
+      st.zoom = "custom"
+      st.zoom_val = math.max(0.05, math.min(64.0, old_scale * (io.mouse_wheel > 0 and 1.15 or 0.87)))
+      if old_scale > 0 and img_w > 0 and img_h > 0 then
+        local nx = w * n * st.zoom_val
+        local ny = h * n * st.zoom_val
+        local fx = (mx - (x0 + (avail_w - img_w) / 2 + st.ox)) / img_w
+        local fy = (my - (y0 + (avail_h - img_h) / 2 + st.oy)) / img_h
+        st.ox = st.ox - fx * (nx - img_w)
+        st.oy = st.oy - fy * (ny - img_h)
+      end
+    end
+
+    -- pan: middle drag, space+drag, or alt+drag
+    local is_space_drag = (io.key_alt or ig.is_key_down(44)) and ig.is_mouse_dragging(0)
+    local is_mid_drag = ig.is_mouse_dragging(2)
+    if is_space_drag or is_mid_drag then
+      st.zoom = "custom" -- Disengage "fit" mode on pan so offsets persist
+      st.zoom_val = scale
+      local drag_btn = is_mid_drag and 2 or 0
+      local dx, dy = ig.get_mouse_drag_delta(drag_btn, 0)
+      st.ox = st.ox + dx
+      st.oy = st.oy + dy
+      ig.reset_mouse_drag_delta(drag_btn)
+    end
+  end
+  -- centered placement
+  local px = x0 + (avail_w - img_w) / 2 + st.ox
+  local py = y0 + (avail_h - img_h) / 2 + st.oy
+
+  local dl = ig.get_window_draw_list()
+  -- checkerboard behind the image area: ONE stretched draw (nearest
+  -- sampling keeps 16px cells chunky) — was ~4000 AddImage calls/frame
+  local cb = checkerboard()
+  ig.dl_push_clip_rect(dl, x0, y0, x0 + avail_w, y0 + avail_h, true)
+  ig.dl_add_image(dl, cb, x0, y0, x0 + avail_w, y0 + avail_h, 0, 0, 1, 1)
+  -- the image (tiled n×n)
+  for ty = 0, n - 1 do
+    for tx = 0, n - 1 do
+      ig.dl_add_image(dl, texid,
+                      px + tx * w * scale, py + ty * h * scale,
+                      px + (tx + 1) * w * scale, py + (ty + 1) * h * scale,
+                      0, 0, 1, 1)
+    end
+  end
+  -- border
+  ig.dl_add_rect(dl, px - 1, py - 1, px + img_w + 1, py + img_h + 1,
+                 0.25, 0.27, 0.32, 1, 0, 1)
+  ig.dl_pop_clip_rect(dl)
+
+  -- paint input (selected layer is a paint layer, click in canvas).
+  -- NOTE: io.want_capture_mouse is NOT a usable gate — imgui 1.92 sets it
+  -- whenever ANY window is hovered, which is always true over the app, so
+  -- paint never fired. The in_canvas check is the real guard.
+  local sel = panels.selected()
+  local sel_layer = sel and doc.get_layer(sel)
+  if sel_layer and sel_layer.type == "paint" then
+    local mx, my = ig.get_mouse_pos()
+    local in_canvas = mx >= px and mx < px + img_w and my >= py and my < py + img_h
+    -- click → working-space pixel: (mouse - image origin) / scale. The
+    -- displayed composite may be a different size than doc.canvas (a
+    -- downscale layer below), so rescale into canvas space before
+    -- paint_append, which normalizes by doc.canvas. Without this, clicks
+    -- on a downscaled project painted a shrunk dab near the origin.
+    local to_canvas = function(v, d)
+      return v * doc.canvas[d] / (d == 1 and w or h)
+    end
+    if ig.is_mouse_clicked(0) and in_canvas and not ig.is_mouse_dragging(2) and
+       not (io.key_alt and ig.is_mouse_dragging(0)) then
+      doc.paint_begin(sel, w, h)
+      doc.paint_append(to_canvas((mx - px) / scale, 1),
+                       to_canvas((my - py) / scale, 2))
+    elseif doc._in_flight and ig.is_mouse_dragging(0) and in_canvas then
+      doc.paint_append(to_canvas((mx - px) / scale, 1),
+                       to_canvas((my - py) / scale, 2))
+    elseif doc._in_flight and not ig.is_mouse_down(0) then
+      doc.paint_end()
+    end
+  end
+end
+
+return preview
