@@ -65,7 +65,7 @@ function canvas.render_viewport(w, h, draw_callback)
     end
     
     -- 2. Pan via Middle-Mouse or Space+Left-Mouse
-    local space_down = ig.is_key_down(ig.Key_Space)
+    local space_down = ig.key and ig.is_key_down(ig.key.Space)
     if is_hovered and (ig.is_mouse_clicked(2) or (space_down and ig.is_mouse_clicked(0))) then
         canvas.is_panning = true
         canvas.pan_start.x = mouse_x - canvas.target_pan.x

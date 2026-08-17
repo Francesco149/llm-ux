@@ -137,17 +137,34 @@ function preview.frame(rect)
   local n = st.tiles or 2
   local img_w, img_h = w * n * scale, h * n * scale
 
-  -- keyboard zoom shortcuts when hovered
+  -- keyboard & mouse wheel zoom shortcuts when hovered
   if ig.is_window_hovered(0) then
-    -- '+' / '=' -> Zoom In
-    if ig.key and (ig.is_key_pressed(ig.key.Equal) or (io.key_ctrl and ig.is_key_pressed(ig.key.Equal))) then
-      st.zoom = "custom"
-      st.zoom_val = clamp(scale * 1.25, 0.05, 64.0)
+    local mx, my = ig.get_mouse_pos()
+
+    local function apply_cursor_zoom(new_scale)
+      if scale > 0 and img_w > 0 and img_h > 0 then
+        local px_old = x0 + (avail_w - img_w) / 2 + st.ox
+        local py_old = y0 + (avail_h - img_h) / 2 + st.oy
+        local u = (mx - px_old) / img_w
+        local v = (my - py_old) / img_h
+
+        local new_img_w = w * n * new_scale
+        local new_img_h = h * n * new_scale
+
+        st.zoom = "custom"
+        st.zoom_val = new_scale
+        st.ox = mx - x0 - (avail_w - new_img_w) / 2 - u * new_img_w
+        st.oy = my - y0 - (avail_h - new_img_h) / 2 - v * new_img_h
+      end
     end
-    -- '-' -> Zoom Out
+
+    -- '+' / '=' -> Zoom In at cursor
+    if ig.key and (ig.is_key_pressed(ig.key.Equal) or (io.key_ctrl and ig.is_key_pressed(ig.key.Equal))) then
+      apply_cursor_zoom(clamp(scale * 1.25, 0.05, 64.0))
+    end
+    -- '-' -> Zoom Out at cursor
     if ig.key and (ig.is_key_pressed(ig.key.Minus) or (io.key_ctrl and ig.is_key_pressed(ig.key.Minus))) then
-      st.zoom = "custom"
-      st.zoom_val = clamp(scale * 0.80, 0.05, 64.0)
+      apply_cursor_zoom(clamp(scale * 0.80, 0.05, 64.0))
     end
     -- '0' or 'F' -> Fit to Viewport
     if ig.key and (ig.is_key_pressed(ig.key["0"]) or ig.is_key_pressed(ig.key.F)) then
@@ -163,18 +180,8 @@ function preview.frame(rect)
 
     -- bare wheel zoom at cursor (anchored on cursor world point)
     if io.mouse_wheel ~= 0 then
-      local mx, my = ig.get_mouse_pos()
-      local old_scale = scale
-      st.zoom = "custom"
-      st.zoom_val = math.max(0.05, math.min(64.0, old_scale * (io.mouse_wheel > 0 and 1.15 or 0.87)))
-      if old_scale > 0 and img_w > 0 and img_h > 0 then
-        local nx = w * n * st.zoom_val
-        local ny = h * n * st.zoom_val
-        local fx = (mx - (x0 + (avail_w - img_w) / 2 + st.ox)) / img_w
-        local fy = (my - (y0 + (avail_h - img_h) / 2 + st.oy)) / img_h
-        st.ox = st.ox - fx * (nx - img_w)
-        st.oy = st.oy - fy * (ny - img_h)
-      end
+      local new_scale = math.max(0.05, math.min(64.0, scale * (io.mouse_wheel > 0 and 1.15 or 0.87)))
+      apply_cursor_zoom(new_scale)
     end
 
     -- pan: middle drag, space+drag, or alt+drag

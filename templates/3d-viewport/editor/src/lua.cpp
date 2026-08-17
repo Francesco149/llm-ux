@@ -252,11 +252,13 @@ void lua_init(const char* root_dir, int argc, char** argv) {
 }
 
 void lua_frame() {
-    ig_clear_draw_lists();
     if (!L_global) return;
+    ig_clear_draw_lists();
+    lua_getglobal(L_global, "lp_frame");
     if (lua_isfunction(L_global, -1)) {
         if (lua_pcall(L_global, 0, 0, 0) != LUA_OK) {
             app_log("[LUA RUNTIME ERROR] %s", lua_tostring(L_global, -1));
+            fprintf(stderr, "[LUA RUNTIME ERROR] %s\n", lua_tostring(L_global, -1));
             lua_pop(L_global, 1);
         }
     } else {
