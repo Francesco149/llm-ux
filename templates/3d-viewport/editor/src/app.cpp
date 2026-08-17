@@ -138,7 +138,7 @@ int app_main(int argc, char** argv) {
         win_flags |= SDL_WINDOW_HIDDEN;
     }
 
-    g_window = SDL_CreateWindow("godot-blockout", win_w, win_h, win_flags);
+    g_window = SDL_CreateWindow("lowpoly-painter", win_w, win_h, win_flags);
     if (!g_window) {
         app_log("Failed to create window: %s", SDL_GetError());
         SDL_Quit();

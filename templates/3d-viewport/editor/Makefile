@@ -1,25 +1,25 @@
-# editor/Makefile — godot-blockout
+# editor/Makefile — lowpoly-painter
 IMGUI ?= $(IMGUI_DIR)
 LUA   ?= $(LUA_SRC)
 STBI  ?= $(STB_INC)
 
 BUILD := ../build
 OBJ   := $(BUILD)/obj
-OUT   := $(BUILD)/godot-blockout.exe
+OUT   := $(BUILD)/lowpoly-painter.exe
 
 FONTS_H := $(BUILD)/fonts_embedded.h
 FONT_UI  := ../assets/fonts/InterVariable.ttf
 FONT_MONO := ../assets/fonts/JetBrainsMono-Regular.ttf
 
-SRC := src/main.cpp src/app.cpp src/ig.cpp src/lua.cpp src/math3d.cpp
+SRC := src/main.cpp src/app.cpp src/ig.cpp src/lua.cpp src/mesh.cpp src/tex.cpp
 
-IMGUI_CORE := imgui.cpp imgui_draw.cpp imgui_tables.cpp imgui_widgets.cpp
+IMGUI_CORE := imgui.cpp imgui_draw.cpp imgui_tables.cpp imgui_widgets.cpp imgui_stdlib.cpp
 IMGUI_BACKEND := imgui_impl_sdl3.cpp imgui_impl_sdlrenderer3.cpp
 
 LUA_C := $(filter-out $(LUA)/src/lua.c $(LUA)/src/luac.c,$(wildcard $(LUA)/src/*.c))
 
 CXXFLAGS_COMMON := -std=c++17 -O2 -g -Wall -Wno-unknown-pragmas \
-  -I src -I $(BUILD) -I $(IMGUI) -I $(IMGUI)/backends \
+  -I src -I $(BUILD) -I $(IMGUI) -I $(IMGUI)/backends -I $(IMGUI)/misc/cpp \
   -I $(LUA)/src -I $(STBI) -I $(STBI)/stb -I src/vendor/stb
 
 OBJ_CXX := $(addprefix $(OBJ)/,$(notdir $(SRC:.cpp=.o)) \
@@ -50,7 +50,7 @@ SDL3_LIBS   ?= $(shell pkg-config --libs sdl3 2>/dev/null)
 , := ,
 LIN_RPATH := $(patsubst -L%,-Wl$(,)-rpath$(,)%,$(filter -L%,$(SDL3_LIBS)))
 
-LINUX_OUT := $(BUILD)/godot-blockout
+LINUX_OUT := $(BUILD)/lowpoly-painter
 LINUX_CXXFLAGS := $(CXXFLAGS_COMMON) $(SDL3_CFLAGS)
 LINUX_LDFLAGS  := -static-libgcc -static-libstdc++
 LINUX_LIBS := $(SDL3_LIBS) -lm -ldl -lpthread $(LIN_RPATH)
@@ -71,6 +71,8 @@ $(OBJ)/%.o: $(IMGUI)/%.cpp | $(OBJ)
 	$(WIN_CXX) $(WIN_CXXFLAGS) -c $< -o $@
 $(OBJ)/%.o: $(IMGUI)/backends/%.cpp | $(OBJ)
 	$(WIN_CXX) $(WIN_CXXFLAGS) -c $< -o $@
+$(OBJ)/%.o: $(IMGUI)/misc/cpp/%.cpp | $(OBJ)
+	$(WIN_CXX) $(WIN_CXXFLAGS) -c $< -o $@
 $(OBJ)/lua/%.o: $(LUA)/src/%.c | $(OBJ)/lua
 	$(WIN_CC) -O2 -std=c11 -I $(LUA)/src -c $< -o $@
 
@@ -79,6 +81,8 @@ $(OBJL)/%.o: src/%.cpp src/editor.h | $(OBJL)
 $(OBJL)/%.o: $(IMGUI)/%.cpp | $(OBJL)
 	$(LINUX_CXX) $(LINUX_CXXFLAGS) -c $< -o $@
 $(OBJL)/%.o: $(IMGUI)/backends/%.cpp | $(OBJL)
+	$(LINUX_CXX) $(LINUX_CXXFLAGS) -c $< -o $@
+$(OBJL)/%.o: $(IMGUI)/misc/cpp/%.cpp | $(OBJL)
 	$(LINUX_CXX) $(LINUX_CXXFLAGS) -c $< -o $@
 $(OBJL)/lua/%.o: $(LUA)/src/%.c | $(OBJL)/lua
 	$(CC) -O2 -std=c11 -I $(LUA)/src -c $< -o $@
@@ -99,22 +103,22 @@ $(OBJL)/lua:
 	mkdir -p $(OBJL)/lua
 
 shot: linux
-	cd .. && SDL_VIDEODRIVER=offscreen ./build/godot-blockout --shot build/shot.png --frames 20
+	cd .. && SDL_VIDEODRIVER=offscreen ./build/lowpoly-painter --shot build/shot.png --frames 20
 
 test: linux
-	cd .. && ./build/godot-blockout --test
+	cd .. && ./build/lowpoly-painter --test
 
 package: win
-	mkdir -p $(BUILD)/godot-blockout-win64
-	rm -f $(BUILD)/godot-blockout-win64/SDL3.dll $(BUILD)/godot-blockout-win64/libmcfgthread-2.dll
-	cp $(OUT) $(BUILD)/godot-blockout-win64/
-	cp $(SDL3_CROSS_DLL) $(BUILD)/godot-blockout-win64/
-	cp $(MCFG_DLL) $(BUILD)/godot-blockout-win64/
-	rm -rf $(BUILD)/godot-blockout-win64/lua
-	cp -r ../editor/lua $(BUILD)/godot-blockout-win64/lua
-	@echo "packaged $(BUILD)/godot-blockout-win64/"
+	mkdir -p $(BUILD)/lowpoly-painter-win64
+	rm -f $(BUILD)/lowpoly-painter-win64/SDL3.dll $(BUILD)/lowpoly-painter-win64/libmcfgthread-2.dll
+	cp $(OUT) $(BUILD)/lowpoly-painter-win64/
+	cp $(SDL3_CROSS_DLL) $(BUILD)/lowpoly-painter-win64/
+	cp $(MCFG_DLL) $(BUILD)/lowpoly-painter-win64/
+	rm -rf $(BUILD)/lowpoly-painter-win64/lua
+	cp -r ../editor/lua $(BUILD)/lowpoly-painter-win64/lua
+	@echo "packaged $(BUILD)/lowpoly-painter-win64/"
 
 clean:
-	rm -rf $(OBJ) $(OBJL) $(BUILD)/godot-blockout-win64 $(OUT) $(LINUX_OUT)
+	rm -rf $(OBJ) $(OBJL) $(BUILD)/lowpoly-painter-win64 $(OUT) $(LINUX_OUT)
 
 .PHONY: win linux test shot package clean

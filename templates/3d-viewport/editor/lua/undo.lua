@@ -1,4 +1,4 @@
--- undo.lua — Snapshot undo/redo journal adhering to the coalescing rule
+-- undo.lua — Snapshot undo/redo journal for lowpoly-painter
 local doc = require("doc")
 
 local undo = {
@@ -15,7 +15,7 @@ function undo.push(desc)
     if #undo.stack > undo.max_depth then
         table.remove(undo.stack, 1)
     end
-    undo.redo_stack = {} -- clear redo on new branch
+    undo.redo_stack = {}
 end
 
 function undo.do_undo()

@@ -1,6 +1,6 @@
-# godot-blockout
+# lowpoly-painter
 
-CSG 3D level blockout editor with Godot-grade viewport controls and 1-click .tscn/.glb export
+Specialized low-poly 3D modeler and handpainted texture painter with auto UVs and procedural bake effects
 
 ## Features
 - **High-Performance Native UI**: Dear ImGui 1.92 with dynamic font rasterization.

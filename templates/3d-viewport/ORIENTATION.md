@@ -1,13 +1,13 @@
-# godot-blockout — orientation
+# lowpoly-painter — orientation
 
-CSG 3D level blockout editor with Godot-grade viewport controls and 1-click .tscn/.glb export
+Specialized low-poly 3D modeler and handpainted texture painter with auto UVs and procedural bake effects
 C++ is a slim core (SDL3/D3D11 window, imgui, Lua VM, GPU/math kernels); ALL UI, interaction logic,
 and document state are embedded Lua 5.4.
 
 ## Environment & Build Rules
 - Everything builds and runs via `nix develop`.
-- `make -C editor`         -> Cross-compiles standalone Windows 64-bit PE (D3D11) via MinGW -> `build/godot-blockout.exe`.
-- `make -C editor linux`   -> Compiles native Linux binary (SDL3/OpenGL) -> `build/godot-blockout`.
+- `make -C editor`         -> Cross-compiles standalone Windows 64-bit PE (D3D11) via MinGW -> `build/lowpoly-painter.exe`.
+- `make -C editor linux`   -> Compiles native Linux binary (SDL3/OpenGL) -> `build/lowpoly-painter`.
 - `make -C editor test`    -> Runs headless test suite (assertions on state & kernels).
 - `make -C editor shot`    -> Captures offscreen UI screenshot to `build/shot.png`.
 - `make -C editor package` -> Assembles standalone release folder with all dependencies.

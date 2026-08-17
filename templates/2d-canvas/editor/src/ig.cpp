@@ -521,6 +521,15 @@ static int l_dl_add_circle_filled(lua_State* L) {
   dl->AddCircleFilled(c, rad, col, (int)luaL_optinteger(L, 9, 24));
   return 0;
 }
+static int l_dl_add_triangle_filled(lua_State* L) {
+  ImDrawList* dl = check_dl(L, 1);
+  ImVec2 a((float)luaL_checknumber(L, 2), (float)luaL_checknumber(L, 3));
+  ImVec2 b((float)luaL_checknumber(L, 4), (float)luaL_checknumber(L, 5));
+  ImVec2 c((float)luaL_checknumber(L, 6), (float)luaL_checknumber(L, 7));
+  ImU32 col = col32(L, 8);
+  dl->AddTriangleFilled(a, b, c, col);
+  return 0;
+}
 static int l_dl_push_clip_rect(lua_State* L) {
   ImDrawList* dl = check_dl(L, 1);
   ImVec2 a((float)luaL_checknumber(L, 2), (float)luaL_checknumber(L, 3));
@@ -619,6 +628,10 @@ static int l_is_item_hovered(lua_State* L) {
 }
 static int l_is_item_edited(lua_State* L) {
   lua_pushboolean(L, ImGui::IsItemEdited());
+  return 1;
+}
+static int l_is_item_deactivated_after_edit(lua_State* L) {
+  lua_pushboolean(L, ImGui::IsItemDeactivatedAfterEdit());
   return 1;
 }
 static int l_is_window_hovered(lua_State* L) {
@@ -851,6 +864,7 @@ void ig_register(lua_State* L) {
   REG(dl_add_line);
   REG(dl_add_text);
   REG(dl_add_circle_filled);
+  REG(dl_add_triangle_filled);
   REG(dl_push_clip_rect);
   REG(dl_pop_clip_rect);
   REG(push_style_color);
@@ -866,6 +880,7 @@ void ig_register(lua_State* L) {
   REG(is_item_active);
   REG(is_item_hovered);
   REG(is_item_edited);
+  REG(is_item_deactivated_after_edit);
   REG(is_window_hovered);
   REG(is_window_focused);
   REG(is_mouse_down);

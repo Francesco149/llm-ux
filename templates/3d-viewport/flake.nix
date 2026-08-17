@@ -1,5 +1,5 @@
 {
-  description = "godot-blockout — CSG 3D level blockout editor with Godot-grade viewport controls and 1-click .tscn/.glb export";
+  description = "lowpoly-painter — Specialized low-poly 3D modeler and handpainted texture painter with auto UVs and procedural bake effects";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -26,7 +26,7 @@
         '';
       in {
         devShells.default = pkgs.mkShell {
-          name = "godot-blockout-dev";
+          name = "lowpoly-painter-dev";
 
           packages = with pkgs; [
             mingw.gcc
@@ -42,7 +42,7 @@
           buildInputs = with pkgs; [ sdl3 libGL mesa ];
 
           shellHook = ''
-            export GB_ROOT=$PWD
+            export LP_ROOT=$PWD
             export IMGUI_DIR=${imguiSrc}
             export LUA_SRC=${luaSrc}
             export STB_INC=${pkgs.stb}/include
@@ -58,7 +58,7 @@
             export MINGW_CC=x86_64-w64-mingw32-gcc
             export MINGW_CXX=x86_64-w64-mingw32-g++
 
-            echo "godot-blockout dev shell ready"
+            echo "lowpoly-painter dev shell ready"
           '';
         };
 
