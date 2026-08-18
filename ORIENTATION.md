@@ -86,3 +86,18 @@ Gemini Flash is sufficient for ~80% of the work (Lua feature code, panel layout,
 - Qwen 3.7 Flash vision: ~$0.03/M → screenshot inspection ≈ $0.001/shot
 
 **Recommendation**: Use Gemini Flash as the primary builder (free). Run Opus adversarial reviews after each major milestone (also free via AI Pro). Reserve DeepSeek V4 for parallel independent debugging sessions where the $1-3 cost is justified by time savings. The current setup of "build with Flash, review with Opus" is near-optimal for cost.
+
+## Current Project Status & Pending Work
+
+### Verified Status (2026-08-18)
+- **Templates**: `templates/2d-canvas/` and `templates/3d-viewport/` are fully hardened with SDL_Renderer/D3D11 backends, static runtime linking, Lua 5.4 compatibility assertions, C++-to-Lua binding parity gates, and headless interactive UI smoke tests.
+- **Skills & Scaffolding**: `skills/native-ui-ux`, `skills/imgui-recipes`, and `skills/scaffold-native-app` are fully synced with Nix home-manager (`/opt/src/nix-lab/hosts/wslop/hm/skills/`) and active harness (`~/.omp/agent/skills/`).
+- **Evaluation Apps**:
+  - `texturewrangler` (`/opt/src/texturewrangler`): 350/350 tests green, golden composite verified.
+  - `godot-blockout` (`/opt/src/godot-blockout`): 35/35 tests green, 1-click `.tscn` export verified.
+  - `lowpoly-painter` (`/opt/src/lowpoly-painter`): 30/30 tests green, auto-UV unwrapping & baking verified.
+
+### Pending Work & Next Session Roadmap
+1. **Automated Multi-Model Adversarial Review Wrapper**: Implement a scripted orchestrator once non-interactive review execution lands in the harness.
+2. **High-DPI / Fractional Scaling Pass**: Add dynamic font size recalculation and UI scaling factor to `theme.lua` across both templates.
+3. **Tileset Variation Layer Pattern**: Add a 4x4 procedural tileset variation modifier to the 2D canvas template.
