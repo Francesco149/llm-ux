@@ -143,6 +143,14 @@ shot-paint: linux
 shot-import: linux
 	cd .. && ./build/cubeforge-raylib --shot build/shot_import.png --frames 10 --drive editor/tests/drive_import.lua
 
+# Headless drive + capture: panel resize via the in-window splitter (latched)
+shot-resize: linux
+	cd .. && ./build/cubeforge-raylib --shot build/shot_resize.png --frames 18 --drive editor/tests/drive_resize.lua
+
+# Headless drive + capture: in-app file browser modal renders (file picker)
+shot-browser: linux
+	cd .. && ./build/cubeforge-raylib --shot build/shot_browser.png --frames 12 --drive editor/tests/drive_browser.lua
+
 # Headless boot + binding checks
 test: linux
 	cd .. && ./build/cubeforge-raylib --test
@@ -154,4 +162,4 @@ win-run: package
 clean:
 	rm -rf $(OBJ) $(WIN_OBJ) $(OUT) $(WIN_OUT) $(BUILD)/cubeforge-raylib-win64
 
-.PHONY: linux win package clean run shot shot-drive shot-pan shot-paint shot-import test win-run
+.PHONY: linux win package clean run shot shot-drive shot-pan shot-paint shot-import shot-resize shot-browser test win-run

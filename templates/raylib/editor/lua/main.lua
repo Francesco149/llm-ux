@@ -20,6 +20,7 @@ local rl = lp.rl
 local geom = require("geom")
 local undo = require("undo")
 local doc = require("doc")
+local filebrowser = require("filebrowser")
 
 -- ── Camera State ────────────────────────────────────────────────────────────
 local cam = {
@@ -545,8 +546,15 @@ function lp_draw3d()
         return
     end
 
-    -- Ground reference grid
-    rl.draw_grid(20, 1.0)
+    -- Ground reference grid. Drawn MANUALLY 2cm below y=0: raylib's
+    -- DrawGrid sits exactly at y=0 where the cube's bottom face is — coplanar
+    -- geometry z-fights (flicker at cube/grid edges). The offset kills it.
+    local GRID_Y = -0.02
+    for i = -10, 10 do
+        local alpha = (i % 5 == 0) and 90 or 30
+        rl.draw_line_3d(i, GRID_Y, -10, i, GRID_Y, 10, 200, 200, 200, alpha)
+        rl.draw_line_3d(-10, GRID_Y, i, 10, GRID_Y, i, 200, 200, 200, alpha)
+    end
 
     -- Render all document meshes with hardware depth testing. Meshes with a
     -- GPU model (pristine primitives) render textured — the canvas texture
@@ -762,41 +770,41 @@ function lp_frame()
     end
 
     -- 3. Right Properties & Tools Side Panel
-    -- Resizable via a drag strip on its left edge (Godot-inspector style);
-    -- the strip shows a resize cursor + amber highlight when hovered, so the
-    -- hitbox is discoverable (hover-affordance doctrine).
+    -- Resizable via an ImGui splitter INSIDE the window's left edge
+    -- (Godot-inspector style). Being a real widget, the handle gets proper
+    -- hover/click capture: no click-through, no highlight bleed, and the
+    -- cursor resets when the pointer leaves.
     local panel_w = sidebar_w
-    local strip_l = sw - panel_w - 8
-    local mx, my = rl.get_mouse_pos()
-    local on_strip = mx >= strip_l and mx <= sw - panel_w + 2
-    -- Latch: once the drag starts on the strip, keep resizing while held,
-    -- even if the cursor leaves the thin hitbox (standard resize-handle UX).
-    if on_strip and rl.is_mouse_button_pressed(rl.MOUSE_LEFT) then
-        CF.resize_active = true
-    end
-    if not rl.is_mouse_button_down(rl.MOUSE_LEFT) then
-        CF.resize_active = false
-    end
-    if CF.resize_active then
-        rl.set_mouse_cursor(rl.CURSOR_RESIZE_EW)
-        local dx, dy = rl.get_mouse_delta()
-        sidebar_w = clamp(sidebar_w - dx, 200, 640)
-    elseif on_strip then
-        rl.set_mouse_cursor(rl.CURSOR_RESIZE_EW)
-    else
-        rl.set_mouse_cursor(rl.CURSOR_DEFAULT)  -- don't leave the resize cursor stuck
-    end
-    panel_w = sidebar_w
-    -- Highlight the strip while hovered/dragging (visual affordance)
-    if on_strip then
-        local dl = ig.get_foreground_draw_list()
-        ig.dl_add_rect_filled(dl, sw - panel_w - 4, 0, sw - panel_w + 2, sh, 0.96, 0.65, 0.12, 0.85)
-    end
     ig.set_next_window_pos(sw - panel_w, 0)
     ig.set_next_window_size(panel_w, sh)
     ig.set_next_window_bg_alpha(0.96)
 
     ig.window("##sidebar", 1 + 2 + 32, function()
+        -- Splitter handle: 6px column at the window's left edge
+        ig.child("##splitter", 6, 0, 0, function()
+            local sx, sy = ig.get_cursor_screen_pos()
+            local dl = ig.get_window_draw_list()
+            local aw, ah = ig.get_content_region_avail()  -- (w, h)
+            ig.invisible_button("##resize_handle", 6, math.max(ah, 1))
+            local on = ig.is_item_hovered()
+            CF.sp_hover = (CF.sp_hover or 0) + (on and 1 or 0)
+            if on and ig.is_mouse_clicked(0) then CF.resize_active = true end
+            if not ig.is_mouse_down(0) then CF.resize_active = false end
+            CF.sp_active = (CF.sp_active or 0) + (CF.resize_active and 1 or 0)
+            if CF.resize_active then
+                local dx = rl.get_mouse_delta()
+                sidebar_w = clamp(sidebar_w - dx, 200, 640)
+            end
+            if on or CF.resize_active then
+                rl.set_mouse_cursor(rl.CURSOR_RESIZE_EW)
+                ig.dl_add_rect_filled(dl, sx, sy, sx + 6, sy + ah, 0.96, 0.65, 0.12, 0.85)
+            else
+                rl.set_mouse_cursor(rl.CURSOR_DEFAULT)
+            end
+        end)
+        ig.same_line()
+        -- Content column (scrolls by default; never set NoScrollbar here)
+        ig.child("##sidebar_content", 0, 0, 0, function()
         ig.text_colored("CubeForge 2D+3D", 0.96, 0.65, 0.12, 1.0)
         ig.same_line()
         ig.text_colored("v1.0", 0.5, 0.5, 0.55, 1.0)
@@ -854,12 +862,13 @@ function lp_frame()
 
         local bc = doc.brush.color
         local col_norm = { (bc[1] or 240) / 255.0, (bc[2] or 120) / 255.0, (bc[3] or 50) / 255.0 }
-        local c_chg, new_c = ig.color_edit3("Color##brush", col_norm[1], col_norm[2], col_norm[3])
+        -- color_edit3 returns (changed, r, g, b) — three numbers, NOT a table
+        local c_chg, cr, cg, cb = ig.color_edit3("Color##brush", col_norm[1], col_norm[2], col_norm[3])
         if c_chg then
             doc.brush.color = {
-                math.floor(new_c[1] * 255 + 0.5),
-                math.floor(new_c[2] * 255 + 0.5),
-                math.floor(new_c[3] * 255 + 0.5),
+                math.floor(cr * 255 + 0.5),
+                math.floor(cg * 255 + 0.5),
+                math.floor(cb * 255 + 0.5),
             }
         end
 
@@ -886,11 +895,18 @@ function lp_frame()
             ig.text_colored("Texture → Cube (2D↔3D)", 0.95, 0.7, 0.2, 1.0)
             ig.text_colored("Drop · Ctrl+V · Open — import an image", 0.6, 0.65, 0.7, 1.0)
             if ig.button("Load Texture…") then
+                -- The in-app browser is the reliable file picker everywhere
+                -- (tinyfiledialogs needs zenity/kdialog on Linux — absent
+                -- under WSLg; "System…" below tries the native dialog).
+                filebrowser.open(".", import_image)
+            end
+            ig.same_line()
+            if ig.button("System…") then
                 local path = lp.app.open_file_dialog()
                 if path then
                     import_image(path)
                 else
-                    doc.status_msg = "Open: no file chosen"
+                    doc.status_msg = "System dialog unavailable — use Load Texture…"
                 end
             end
             ig.same_line()
@@ -935,18 +951,22 @@ function lp_frame()
         ig.text_colored("  1/2/3", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Vert / Edge / Face")
         ig.text_colored("  4 / B", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Paint mode")
         ig.text_colored("  5", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Texture Paint (2D)")
-        ig.text_colored("  Ctrl+Z", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Undo")
-        ig.text_colored("  Ctrl+Y", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Redo")
-        ig.text_colored("  Ctrl+E", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Export OBJ")
-        ig.text_colored("  MMB", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Tilt / Orbit")
-        ig.text_colored("  Shift+MMB", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("3D Pan")
-        ig.text_colored("  RMB", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Fly (WASD/QE)")
-        ig.text_colored("  Wheel", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Zoom / Dolly")
+        ig.text_colored("  Ctrl+Z", 0.95, 0.7, 0.2, 1.0); ig.same_line(84); ig.text("Undo")
+        ig.text_colored("  Ctrl+Y", 0.95, 0.7, 0.2, 1.0); ig.same_line(84); ig.text("Redo")
+        ig.text_colored("  Ctrl+E", 0.95, 0.7, 0.2, 1.0); ig.same_line(84); ig.text("Export OBJ")
+        ig.text_colored("  MMB", 0.95, 0.7, 0.2, 1.0); ig.same_line(84); ig.text("Tilt / Orbit")
+        ig.text_colored("  Shift+MMB", 0.95, 0.7, 0.2, 1.0); ig.same_line(84); ig.text("3D Pan")
+        ig.text_colored("  RMB", 0.95, 0.7, 0.2, 1.0); ig.same_line(84); ig.text("Fly (WASD/QE)")
+        ig.text_colored("  Wheel", 0.95, 0.7, 0.2, 1.0); ig.same_line(84); ig.text("Zoom / Dolly")
 
         ig.separator()
         ig.text_colored(doc.status_msg or "", 0.7, 0.75, 0.8, 1.0)
-    end)
+        end)  -- sidebar_content child
+    end)  -- sidebar window
+
+    -- File browser modal (on top of everything)
+    filebrowser.frame()
 end
 
 -- Global handle for drive assertions (CF.cam2d / CF.doc)
-CF = { cam = cam, cam2d = cam2d, doc = doc, sidebar = function() return sidebar_w end, import = import_image }
+CF = { cam = cam, cam2d = cam2d, doc = doc, sidebar = function() return sidebar_w end, import = import_image, browser = filebrowser }

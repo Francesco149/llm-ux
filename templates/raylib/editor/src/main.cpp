@@ -1242,11 +1242,45 @@ static int l_file_mkdirs(lua_State* L) {
     return 0;
 }
 
+// lp.file.exists(path) -> bool
+static int l_file_exists(lua_State* L) {
+    lua_pushboolean(L, FileExists(luaL_checkstring(L, 1)));
+    return 1;
+}
+
+// lp.file.list_dir(path) -> dirs{}, files{} (basenames, no subdir scan).
+// Backing the in-app file browser fallback (no zenity/kdialog on WSLg).
+static int l_file_list_dir(lua_State* L) {
+    const char* path = luaL_checkstring(L, 1);
+    FilePathList list = LoadDirectoryFiles(path);
+    lua_newtable(L);  // dirs
+    lua_newtable(L);  // files
+    int nd = 0, nf = 0;
+    for (unsigned int i = 0; i < list.count; i++) {
+        const char* p = list.paths[i];
+        if (DirectoryExists(p)) {
+            nd++;
+            lua_pushstring(L, GetFileName(p));
+            lua_rawseti(L, -3, nd);
+        } else {
+            nf++;
+            lua_pushstring(L, GetFileName(p));
+            lua_rawseti(L, -2, nf);
+        }
+    }
+    UnloadDirectoryFiles(list);
+    return 2;
+}
+
 static void file_register(lua_State* L) {
     lua_getglobal(L, "lp");
     lua_newtable(L);
     lua_pushcfunction(L, l_file_mkdirs);
     lua_setfield(L, -2, "mkdirs");
+    lua_pushcfunction(L, l_file_exists);
+    lua_setfield(L, -2, "exists");
+    lua_pushcfunction(L, l_file_list_dir);
+    lua_setfield(L, -2, "list_dir");
     lua_setfield(L, -2, "file");
     lua_pop(L, 1);
 }
@@ -1536,6 +1570,10 @@ int main(int argc, char** argv) {
     int frame = 0;
     bool running = true;
     while (running && !WindowShouldClose()) {
+        // Process OS events BEFORE this frame renders (raylib's EndDrawing
+        // also polls, but early polling applies resize/input events to the
+        // CURRENT frame — keeps window-resize handling as live as possible).
+        PollInputEvents();
         // Drive step BEFORE input is read: executes this frame's plan + boundary
         if (drive_loaded) lp_call_global("drive_step");
 

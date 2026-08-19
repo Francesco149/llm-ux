@@ -686,3 +686,65 @@ ig.same_line(dw - 180)
 if ig.button("Export (.tscn)") then ... end
 ```
 **CRITICAL**: Gizmo arrows that only draw lines without drag interaction are useless decoration. Every gizmo MUST support mouse drag with axis-constrained movement. The recipe above provides: hit-testing → constrained drag → visual feedback → commit on release.
+
+---
+
+## 11. Resizable Side Panel (Godot-Inspector Splitter)
+
+❌ **NEVER** implement a resize strip as a screen-space manual hit-test outside
+the ImGui window — ImGui windows overlap it, clicks pass through, the hover
+highlight bleeds under/over the window, and the cursor gets stuck.
+
+✅ **ALWAYS** make the handle a REAL ImGui widget INSIDE the window: a 6px
+`invisible_button` in a child column, with the content in a sibling child via
+`ig.same_line()`. ImGui then owns hover/click capture (no click-through), the
+highlight is clipped to the handle child, and the cursor resets on leave.
+
+```lua
+-- sidebar_w is module state (clamp 200..640)
+ig.window("##sidebar", 1 + 2 + 32, function()
+    ig.child("##splitter", 6, 0, 0, function()          -- 6px handle column
+        local sx, sy = ig.get_cursor_screen_pos()
+        local dl = ig.get_window_draw_list()
+        local aw, ah = ig.get_content_region_avail()    -- RETURNS TWO VALUES
+        ig.invisible_button("##resize_handle", 6, math.max(ah, 1))
+        local on = ig.is_item_hovered()
+        if on and ig.is_mouse_clicked(0) then resize_active = true end
+        if not ig.is_mouse_down(0) then resize_active = false end
+        if resize_active then
+            local dx = rl.get_mouse_delta()             -- or ig.get_mouse_delta
+            sidebar_w = clamp(sidebar_w - dx, 200, 640)
+        end
+        if on or resize_active then
+            rl.set_mouse_cursor(rl.CURSOR_RESIZE_EW)
+            ig.dl_add_rect_filled(dl, sx, sy, sx + 6, sy + ah, 0.96, 0.65, 0.12, 0.85)
+        else
+            rl.set_mouse_cursor(rl.CURSOR_DEFAULT)     -- never leave it stuck
+        end
+    end)
+    ig.same_line()
+    ig.child("##content", 0, 0, 0, function()          -- scrolls by default
+        -- ... panel body ...
+    end)
+end)
+```
+The drag LATCHES (`resize_active`) so the cursor may leave the 6px handle
+mid-drag. `get_content_region_avail()` returns `(w, h)` — capturing only one
+makes the handle 6px TALL (invisible). Same trap: `color_edit3/4` return
+`(changed, r, g, b[, a])` — numbers, NOT a table.
+
+---
+
+## 12. Reference Grid vs Coplanar Geometry (Z-Fighting)
+
+Never draw a reference grid coplanar with mesh geometry (raylib's `DrawGrid`
+sits at y=0 — a cube's bottom face is y=0 → the edges flicker). Draw the grid
+slightly below with manual lines:
+```lua
+local GRID_Y = -0.02
+for i = -10, 10 do
+    local alpha = (i % 5 == 0) and 90 or 30
+    rl.draw_line_3d(i, GRID_Y, -10, i, GRID_Y, 10, 200, 200, 200, alpha)
+    rl.draw_line_3d(-10, GRID_Y, i, 10, GRID_Y, i, 200, 200, 200, alpha)
+end
+```

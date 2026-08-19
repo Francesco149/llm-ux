@@ -254,7 +254,39 @@ end)
 ```
 
 **Auto-balance safety net**: every scoped call is depth-tracked per category, and `ig_balance_check()` force-closes any unbalanced Begin/End pair at frame end with a warning instead of crashing. It catches errors that slip through — but it is a backstop, never a reason to hand-write raw begin/end. Unbalanced scopes can still clip or misplace content mid-frame, so the review gate is: no raw `ig.begin_*` / `ig.end_*` in committed UI code.
-|---
+
+## 3h. Widget Return Conventions (Avoid Silent Snaps)
+
+The binding layer returns FLAT values, not tables, for widgets that mutate a
+buffer in place:
+- `ig.color_edit3/4`, `ig.color_picker3/4` → `(changed, r, g, b[, a])` —
+  NUMBERS. Assigning the second return to a table (`new_c[1]`) is nil-indexed
+  → the arithmetic errors, the pcall swallows it, and the picker appears to
+  snap back to the default. `ig.slider_float/int`, `drag_float/int` → also
+  `(changed, new_value)` flat.
+- `ig.get_content_region_avail()` → `(w, h)` — capture BOTH. Keeping only one
+  makes full-height hitboxes 6px tall.
+
+## 3i. File Import Doctrine (Drop / Paste / Picker — ONE Pipeline)
+
+Every tool that accepts assets MUST route drag&drop, Ctrl+V paste, and the
+file-picker button through the SAME import function (load → validate →
+apply), and MUST reject unsupported inputs gracefully (status message, no
+state change, no crash):
+
+- Drop: OS event → first path. Paste: clipboard FILE (Windows CF_HDROP via a
+  Win32 helper file — never GLFW's clipboard-string path, it errors on
+  files/empty) or text path (strip `file://`). Picker: the in-app browser is
+  the reliable picker (native dialogs need zenity/kdialog on Linux and can
+  silently fail); keep a "System…" button as a bonus.
+- Rejection path MUST be tested headlessly: bad path → false, canvas
+  unchanged; round-trip → identical pixels.
+
+## 3j. Reference Grid vs Coplanar Geometry
+
+Never place a reference grid coplanar with mesh faces (raylib `DrawGrid` at
+y=0 vs a cube bottom at y=0 → edge flicker/z-fighting). Offset the grid
+slightly below the geometry (e.g. `GRID_Y = -0.02`).
 
 ## 4. ImGui Visual Ergonomics & Theme Aesthetics
 

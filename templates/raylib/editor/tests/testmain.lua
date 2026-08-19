@@ -269,6 +269,14 @@ ok(type(rl.take_dropped_file) == "function", "rl.take_dropped_file")
 ok(type(rl.get_clipboard_text) == "function", "rl.get_clipboard_text")
 ok(type(tex.load_image_from_file) == "function", "tex.load_image_from_file")
 ok(type(lp.app.open_file_dialog) == "function", "app.open_file_dialog")
+ok(type(lp.file.list_dir) == "function", "file.list_dir")
+ok(type(lp.file.exists) == "function", "file.exists")
+
+-- In-app file browser: lists the repo's own files (headless-safe)
+local fdirs, ffiles = lp.file.list_dir(".")
+ok(type(fdirs) == "table" and type(ffiles) == "table", "list_dir returns dirs + files tables")
+ok(lp.file.exists("editor/lua/main.lua") == true, "file.exists finds editor/lua/main.lua")
+ok(lp.file.exists("definitely_missing_xyz") == false, "file.exists false for missing")
 
 -- Rejection: nonexistent / unsupported paths return false, canvas untouched
 local imp_tid = tex.create(32, 32)

@@ -168,10 +168,16 @@ canvas is untouched.
   path). Drop events are OS-level, so this needs interactive verification on
   the host; the import CORE is covered headlessly by `shot-import` and the
   `testmain.lua` round-trip/rejection tests.
-- Paste: `lp.rl.get_clipboard_text()` — if it's a file path, import it.
-- File picker: `lp.app.open_file_dialog()` — vendored tinyfiledialogs
-  (native dialogs on Windows; zenity/kdialog on Linux; nil if unavailable).
-  Compiled as C (`gnu11` — its `popen` use needs POSIX extensions).
+- Paste: `lp.rl.clipboard_file_path()` — Windows reads CF_HDROP directly
+  (`src/winclip.c`; files copied in Explorer paste cleanly, and GLFW's
+  "Failed to convert clipboard to string" error never fires); Linux reads
+  clipboard text + strips `file://`. Falls back to text only when a text
+  format is actually present.
+- File picker: the in-app `filebrowser.lua` modal is the RELIABLE picker
+  everywhere — "Load Texture…" opens it. A secondary "System…" button tries
+  `lp.app.open_file_dialog()` (vendored tinyfiledialogs; native on Windows,
+  zenity/kdialog on Linux, nil when unavailable — under WSLg it's always nil).
+  The browser is backed by `lp.file.list_dir`/`lp.file.exists`.
 
 ## Interaction doctrine (baked into main.lua — keep it)
 
@@ -189,20 +195,36 @@ canvas is untouched.
   re-applies the binding on commit/cancel/undo. Perlin no longer vanishes on
   first edit; canvas paint persists on the cube.
 - **Panel resize (Godot-inspector style)**: the right sidebar is resizable via
-  a drag strip on its left edge. The drag LATCHES on mouse-down (the cursor
-  may leave the thin hitbox during the drag). Hover affordances are
-  mandatory for any draggable region: cursor change (`lp.rl.set_mouse_cursor`,
-  `rl.CURSOR_RESIZE_EW`) + visual highlight. Panels scroll by default (do not
-  set `NoScrollbar` unless intentional).
+  an ImGui splitter INSIDE the window's left edge (a 6px `invisible_button` in
+  a child + `ig.same_line()` content column) — NOT a screen-space manual
+  hit-test. A real widget gets proper hover/click capture: no click-through,
+  no highlight bleed, cursor resets on leave. The drag LATCHES on mouse-down
+  (`CF.resize_active`) so the cursor may leave the thin handle mid-drag.
+  Scrollable by default (never set `NoScrollbar` on the content column).
+- **Color widgets return flat values**: `ig.color_edit3/4` and
+  `ig.color_picker3/4` return `(changed, r, g, b[, a])` — NUMBERS, not a
+  table. Treating the second return as a table silently fails (pcall swallows
+  it → the picker appears to snap back to the default).
+- **File import doctrine**: drag&drop, Ctrl+V paste, and the file picker all
+  route through ONE `import_image(path)` pipeline. The picker is the in-app
+  `filebrowser.lua` modal (native dialogs need zenity/kdialog on Linux and can
+  silently fail on Windows) — "Load Texture…" opens the browser; "System…"
+  tries tinyfiledialogs. Unsupported/unreadable inputs are REJECTED with a
+  status message and never touch the existing canvas.
+- **Ground grid z-fighting**: never draw a reference grid coplanar with mesh
+  geometry (raylib's `DrawGrid` sits at y=0, the cube's bottom face) — the
+  edges flicker. Draw it slightly below (`GRID_Y = -0.02`) with manual lines.
 - **Resize handling**: cheap per-frame state (camera aspect, cam2d offset,
-  viewport rect) MUST read the live window size every frame. Heavy work on
-  resize MUST be debounced (~120 ms after the size stops changing) — see the
-  `resize_settled()` helper in main.lua. NOTE: do NOT override raylib's
-  viewport with `rlViewport`/`rlGetFramebufferWidth` — raylib's tracked size
-  lags the real framebuffer on Windows drag loops, and forcing the viewport
-  from that stale value made content degenerate after resize (tried, reverted
-  2026-08-19). During-drag stretch is a raylib/GLFW presentation artifact;
-  the frame renders correctly the moment the new size lands.
+  viewport rect) MUST read the live window size every frame; heavy work on
+  resize MUST be debounced (~120 ms, `resize_settled()` helper). The main loop
+  calls `PollInputEvents()` BEFORE rendering so resize/input events apply to
+  the current frame (raylib also polls at EndDrawing). Evidence from raylib
+  6.0 source: `FramebufferSizeCallback` updates `CORE.Window.render` +
+  `currentFbo` + `SetupViewport` live; the 3D projection aspect comes from
+  `currentFbo` — so in-app rendering IS size-live. Any remaining stretch
+  during the drag is the platform drag loop blocking present (Windows GDI
+  modal resize / compositor), not an app-side size lag — do NOT try to force
+  the viewport (`rlViewport` overrides made it worse; reverted 2026-08-19).
 - **Hover affordances**: every draggable region shows a cursor change
   (`lp.rl.set_mouse_cursor`) + a visual highlight. ALWAYS reset the cursor
   (`CURSOR_DEFAULT`) when the pointer leaves the region — a stuck resize
