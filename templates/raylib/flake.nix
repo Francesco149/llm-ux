@@ -62,6 +62,8 @@
             export FONT_LATIN=${pkgs.inter}/share/fonts/truetype/InterVariable.ttf
             export FONT_CJK=${pkgs.ipafont}/share/fonts/truetype/ipag.ttf
             export STB_INC=${pkgs.stb}/include/stb
+            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath (with pkgs; [ libGL libx11 libxrandr libxinerama libxcursor libxi wayland ])}:/run/opengl-driver/lib:''${LD_LIBRARY_PATH:-}"
+
 
             # Windows cross: raylib import lib + runtime DLL from pkgsCross
             export RAYLIB_CROSS_INC=${mingwPkgs.raylib}/include

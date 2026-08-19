@@ -1754,6 +1754,11 @@ int main(int argc, char** argv) {
     if (headless) cfg |= FLAG_WINDOW_HIDDEN;  // render without stealing focus
     SetConfigFlags(cfg);
     InitWindow(req_w, req_h, "CubeForge — Raylib + ImGui + Lua");
+    if (!IsWindowReady()) {
+        app_log("[FATAL] InitWindow failed: graphics display or windowing backend unavailable.");
+        lua_shutdown();
+        return 1;
+    }
     SetTargetFPS(0); // Unlocked / synchronized to monitor native refresh rate (e.g. 240Hz)
 
     // Guard against negative window positions or monitor bounds overflow (e.g. 800x600 displays):
