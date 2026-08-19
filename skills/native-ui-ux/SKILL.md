@@ -288,6 +288,39 @@ Never place a reference grid coplanar with mesh faces (raylib `DrawGrid` at
 y=0 vs a cube bottom at y=0 → edge flicker/z-fighting). Offset the grid
 slightly below the geometry (e.g. `GRID_Y = -0.02`).
 
+## 3k. Multi-Selection & Unified Selection Grammar
+
+Any interface managing discrete elements (3D vertices/edges/faces, timeline clips, piano-roll notes, canvas shapes) MUST support multi-selection by default:
+
+1. **Selection Mechanics**:
+   - **`Shift + Click`**: Toggles item into or out of the current selection set.
+   - **Box / Marquee Selection**: `Shift + Drag` (or default empty-space drag on infinite canvas / timeline editors) draws a rectangular marquee selecting all enclosed or intersected items.
+   - **`Ctrl + A` (Select All)** & **`Ctrl + D` (Deselect All)**: Universal hotkeys supported by default across all selection modes.
+
+2. **Priority Hit-Testing for Selected Items**:
+   - When clicking or dragging near overlapping items, **selected items MUST hit-test first** (`hit_sel or hit`).
+   - *Rationale*: A user who selected an item expects mouse drags on that item to move the selection, even if another unselected item partially overlaps it.
+
+3. **Default Multi-Transform for Trivial Operations**:
+   - Moving, nudging, rotating, or deleting MUST apply to all selected elements simultaneously by the same transform delta ($\Delta x, \Delta y, \Delta z$) without requiring the user to switch modes or re-select.
+
+4. **Delete Dissolve / Vaporize Visual Cue**:
+   - When items are deleted or erased, trigger a brief smooth alpha fade or upward particle dissolve (e.g. sine-in-out decay over 250ms with scalar-geometry afterimages capped at 64 instances) rather than an abrupt visual pop, reinforcing non-destructive state safety.
+
+## 3l. Multi-Manipulation Semantics (Group Trim vs Proportional Stretch)
+
+For multi-item manipulations with non-trivial semantics (resizing lengths, stretching spacing), unambiguous mathematical rules MUST be defined before implementation:
+
+1. **Multi-Length / Multi-Trim (Delta Offset)**:
+   - Dragging the resize edge of a multi-selection offsets all selected durations by the grabbed item's delta:
+     $$L_i' = \max(L_{\min}, L_i + \Delta x)$$
+   - *Behavior*: Preserves relative length spread across varied items until clamped by minimum bounds. Holding `Ctrl` overrides this to snap all selected items to the exact same absolute duration ($L_i' = \text{target}$).
+
+2. **Multi-Stretch (Proportional Scale)**:
+   - Dragging a bounding boundary or executing spacing scaling multiplies time/spatial offsets relative to an anchor point ($x_0 = \min_i(x_i)$):
+     $$x_i' = x_0 + (x_i - x_0) \times s$$
+   - *Behavior*: Preserves exact relative spatial and rhythmic ratios.
+
 ## 4. ImGui Visual Ergonomics & Theme Aesthetics
 
 Default ImGui looks dated and dull (gray background, bright blue active widgets, sharp corners). Native tools must look premium, modern, and distinct.

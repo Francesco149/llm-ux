@@ -748,3 +748,163 @@ for i = -10, 10 do
     rl.draw_line_3d(-10, GRID_Y, i, 10, GRID_Y, i, 200, 200, 200, alpha)
 end
 ```
+
+---
+
+## 13. Multi-Selection & Marquee Selection Canvas
+
+A robust multi-selection state machine supporting `Shift+Click` toggle, drag box marquee, priority hit-testing, and unified multi-transform:
+
+```lua
+local selection = {
+    items = {},        -- set of selected item references { [item] = true }
+    marquee = nil,     -- { x0, y0, x1, y1, active = bool, additive = bool }
+    drag_bases = nil,  -- snapshot of item positions at drag start
+}
+
+-- Priority Hit-Testing: selected items MUST hit-test first
+function selection.hit_test(elements, mx, my)
+    local hit_unselected = nil
+    for _, elem in ipairs(elements) do
+        if mx >= elem.x and mx <= elem.x + elem.w and my >= elem.y and my <= elem.y + elem.h then
+            if selection.items[elem] then
+                return elem -- priority return: grabbed selected item
+            elseif not hit_unselected then
+                hit_unselected = elem
+            end
+        end
+    end
+    return hit_unselected
+end
+
+-- Marquee Box Selection
+function selection.update_marquee(elements, mx, my, is_mouse_down, shift_held)
+    if not selection.marquee and is_mouse_down then
+        selection.marquee = { x0 = mx, y0 = my, x1 = mx, y1 = my, active = false, additive = shift_held }
+    end
+    if selection.marquee and is_mouse_down then
+        local m = selection.marquee
+        m.x1, m.y1 = mx, my
+        if math.abs(m.x1 - m.x0) > 4 or math.abs(m.y1 - m.y0) > 4 then
+            m.active = true
+        end
+        if m.active then
+            local l0, l1 = math.min(m.x0, m.x1), math.max(m.x0, m.x1)
+            local t0, t1 = math.min(m.y0, m.y1), math.max(m.y0, m.y1)
+            if not m.additive then selection.items = {} end
+            for _, elem in ipairs(elements) do
+                if elem.x + elem.w > l0 and elem.x < l1 and elem.y + elem.h > t0 and elem.y < t1 then
+                    selection.items[elem] = true
+                end
+            end
+        end
+    elseif selection.marquee and not is_mouse_down then
+        selection.marquee = nil
+    end
+end
+
+-- Default Multi-Transform Delta
+function selection.apply_move_delta(dx, dy)
+    for elem in pairs(selection.items) do
+        elem.x = (selection.drag_bases[elem].x) + dx
+        elem.y = (selection.drag_bases[elem].y) + dy
+    end
+end
+```
+
+---
+
+## 14. Music Sequencer & Timeline Track Grammar (FL Studio & Cosmic2D Pattern)
+
+The definitive interaction language for timelines, piano rolls, arrangement tracks, and discrete event editors:
+
+### 1. Note Body Move vs Right-Edge Resize Handle
+The rightmost 8px strip of an element is a duration resize handle; the remainder moves/pitches the note:
+```lua
+function get_note_hit_zone(note, mx, my, tpp, row_h, inset_px)
+    inset_px = inset_px or 8
+    local nx0 = time_to_x(note.tick)
+    local nw0 = math.max(4, note.dur * tpp)
+    local ny0 = pitch_to_y(note.pitch)
+    if mx >= nx0 and mx < nx0 + nw0 and my >= ny0 and my < ny0 + row_h then
+        if mx >= nx0 + nw0 - inset_px then
+            return "resize_edge" -- triggers CURSOR_RESIZE_EW
+        else
+            return "body"        -- triggers translation / pitch drag
+        end
+    end
+    return nil
+end
+```
+
+### 2. Paint Pattern Repeat Logic (Forward Stamp vs Backwards Threshold)
+Dragging forward past the end of a clip/note stamps adjacent linked repetitions; dragging to the left requires intentionally dragging past the beginning before backwards repeating starts:
+```lua
+function update_paint_repeat(pattern_len, start_tick, cur_tick)
+    if cur_tick >= start_tick then
+        -- Forward repeat: stamp every pattern_len
+        return math.floor((cur_tick - start_tick) / pattern_len)
+    else
+        -- Backwards threshold: must drag PAST start_tick - pattern_len to trigger
+        local delta = start_tick - cur_tick
+        if delta >= pattern_len then
+            return -math.floor(delta / pattern_len)
+        end
+        return 0
+    end
+end
+```
+
+### 3. Multi-Length Trim vs Multi-Stretch Proportional Scaling
+- **Multi-Length / Group Trim**: offsets all selected note durations by the dragged delta ($L_i' = \max(L_{\min}, L_i + \Delta x)$), maintaining relative lengths until clamped. Holding `Ctrl` forces uniform duration snap ($L_i' = \text{target}$).
+- **Multi-Stretch**: scales note start positions relative to the earliest selected tick ($t_i' = t_0 + (t_i - t_0) \times s$), preserving rhythmic proportions.
+
+```lua
+-- Multi-Length Group Trim (maintains spread unless ctrl held)
+function group_trim_lengths(selected_notes, grabbed_note, new_dur, ctrl_held, min_dur)
+    local delta = new_dur - grabbed_note.dur
+    for _, n in ipairs(selected_notes) do
+        if ctrl_held then
+            n.dur = math.max(min_dur, new_dur)
+        else
+            n.dur = math.max(min_dur, n.dur + delta)
+        end
+    end
+end
+
+-- Multi-Stretch Proportional Scale
+function stretch_notes(selected_notes, scale_factor)
+    if #selected_notes < 2 then return end
+    local anchor = math.huge
+    for _, n in ipairs(selected_notes) do anchor = math.min(anchor, n.tick) end
+    for _, n in ipairs(selected_notes) do
+        n.tick = math.floor(anchor + (n.tick - anchor) * scale_factor + 0.5)
+    end
+end
+```
+
+### 4. Delete Dissolve / Vaporize Cue
+Trigger smooth sine-in-out alpha decay with subtle upward drift over 250ms when deleting items:
+```lua
+local delete_fx = {} -- ring buffer capped at 64 items
+function arm_delete_cue(x, y, w, h, label)
+    if #delete_fx >= 64 then table.remove(delete_fx, 1) end
+    delete_fx[#delete_fx + 1] = { x = x, y = y, w = w, h = h, label = label, start_time = os.clock() }
+end
+
+function render_delete_cues(dl, cur_time)
+    for i = #delete_fx, 1, -1 do
+        local fx = delete_fx[i]
+        local elapsed = cur_time - fx.start_time
+        if elapsed > 0.250 then
+            table.remove(delete_fx, i)
+        else
+            local t = elapsed / 0.250
+            local alpha = (1.0 - t * t) * 0.75
+            local y_offset = t * 8.0 -- float upward
+            ig.dl_add_rect_filled(dl, fx.x, fx.y - y_offset, fx.x + fx.w, fx.y + fx.h - y_offset, 0.96, 0.4, 0.4, alpha)
+            ig.dl_add_rect(dl, fx.x, fx.y - y_offset, fx.x + fx.w, fx.y + fx.h - y_offset, 1.0, 0.8, 0.8, alpha)
+        end
+    end
+end
+```

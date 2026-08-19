@@ -158,7 +158,7 @@ subclass render. No time is "lost" across the modal loop.
 ## 9. History / related
 
 - D3D11 backend existed solely to get smooth resize; with this fix OGL 3.3
-  ships everywhere and D3D11 is removed (see `TODO_D3D11_REMOVAL.md`).
+  ships everywhere and D3D11 is completely removed.
 - For the record, the Win7 D3D11 `0x80070057` was
   `D3D_FEATURE_LEVEL_11_1` in the feature-level array on a box without
   KB2670838 (the whole call fails E_INVALIDARG, fallback included, because
