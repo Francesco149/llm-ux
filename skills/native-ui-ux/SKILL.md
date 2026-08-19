@@ -115,14 +115,20 @@ local factor = math.pow(1.15, io.mouse_wheel)  -- WRONG: crashes in Lua 5.4
 
 ---
 
-## 3b. 3D DrawList Rendering: Painter's Algorithm Required
+## 3b. 3D Rendering: Prefer Real 3D Scenes (DrawList 3D is Escape-Hatch Only)
 
-ImGui DrawList is a **2D immediate-mode API with no Z-buffer**. When rendering 3D meshes via projected triangles (`dl_add_triangle_filled`), faces MUST be sorted back-to-front before drawing. Without this, back faces render on top of front faces.
+⚠️ **BIG WARNING — ALWAYS PREFER A REAL 3D SCENE (RAYLIB 6.0 / OPENGL 3.3)**:
+ImGui DrawList is a **2D immediate-mode canvas with NO hardware depth buffer, NO GPU shaders, and NO hardware texture mapping**.
+- **ALWAYS use a real 3D scene (`BeginMode3D` / `lp.rl.*`)**: Let the GPU's hardware Z-buffer resolve occlusion automatically with zero CPU overhead, zero Z-sorting sorting artifacts, and full shader support.
+- **NEVER try to build a 3D creation tool by projecting 3D geometry onto a 2D ImGui DrawList** unless there is a strict requirement for a lightweight 2D-only canvas overlay or gizmo badge.
 
-❌ **WRONG** — drawing faces in array order:
+### Escape-Hatch Rule (Painter's Algorithm for 2D DrawList Overlays):
+If you MUST project 3D triangles onto a 2D ImGui DrawList (e.g. lightweight floating HUD gizmos), faces MUST be sorted back-to-front before submission because DrawList renders in array order with no Z-test.
+
+❌ **WRONG** — drawing 3D triangles to DrawList in raw array order:
 ```lua
 for f_idx, f in ipairs(doc.mesh.faces) do
-    -- project and draw → back faces occlude front faces
+    -- raw projection to DrawList → back faces occlude front faces!
 end
 ```
 
@@ -145,7 +151,7 @@ table.sort(sorted, function(a, b) return a.avg_z > b.avg_z end) -- far first
 for _, sf in ipairs(sorted) do
     -- draw sf.pts triangles, wireframe, gizmos
 end
-
+```
 ---
 
 ## 3c. 3D Line & Grid Rendering: Camera Near-Plane Clipping Required

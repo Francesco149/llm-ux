@@ -614,8 +614,9 @@ end
 
 ---
 
-## 9. 3D Line & Grid Drawing with Near-Plane Clipping
+## 9. 3D Line & Grid Drawing with Near-Plane Clipping (2D DrawList Overlay)
 
+> **Note**: In standard Raylib 3D tools, prefer hardware 3D primitives (`lp.rl.draw_line_3d`, `lp.rl.draw_grid`). This recipe is specifically for projecting 3D lines onto a 2D ImGui DrawList overlay or canvas.
 In perspective projection, points behind the camera ($z_{cam} > 0$ or $w < 0$) invert their $X/Y$ coordinates when divided by $w$. If a 3D line segment has one endpoint in front of the camera and one endpoint behind the camera:
 1. Checking `sz > 0` on both endpoints drops the entire line as soon as one end goes behind the camera near plane (causing grid lines to vanish near the ground or during camera rotation).
 2. Projecting unclipped endpoints connects the valid point to an inverted point on the opposite side of the screen, creating stray lines that shoot across the viewport to a fake horizon vanishing point.
