@@ -33,28 +33,53 @@ document state are embedded Lua 5.4.
 - **Ctrl+Z / Ctrl+Y** — canvas undo/redo (stroke coalescing: one undo per stroke)
 - 3D controls are unchanged (Godot language): MMB tilt, Shift+MMB pan, RMB fly WASD/QE, wheel dolly.
 
-## Build & Headless Verification (preferred over window-focus tools)
+## Build & Distribution Targets
 ```sh
 nix develop
-make -C editor linux        # → build/cubeforge-raylib
-make -C editor win          # → build/cubeforge-raylib.exe (mingw cross)
-make -C editor package      # → build/cubeforge-raylib-win64/ standalone folder
-make -C editor test         # headless boot + binding checks (no window)
-make -C editor shot         # headless screenshot → build/shot.png (hidden window)
-make -C editor shot-drive   # 3D orbit tape → build/shot_orbit.png (camera moved)
-make -C editor shot-pan     # 2D pan tape → build/shot_pan.png (MMB pan moved cam2d)
-make -C editor shot-paint   # 2D→3D paint tape → build/shot_paint3d.png (painted cube)
-make -C editor shot-win-resize # dynamic window resize test → build/shot_win_resize.png
-make -C editor run          # interactive
+make -C editor linux          # → build/cubeforge-raylib (Linux OpenGL 3.3)
+make -C editor win            # → build/cubeforge-raylib.exe (Windows OpenGL 3.3)
+make -C editor win-d3d11      # → build/cubeforge-d3d11.exe (Windows Direct3D 11 DXGI Flip Model)
 
-CLI modes:
-```sh
-build/cubeforge-raylib                            # interactive
-build/cubeforge-raylib --test                     # boot VM + run tests/testmain.lua
-build/cubeforge-raylib --shot out.png --frames N  # hidden-window capture, N frames
-build/cubeforge-raylib --shot out.png --frames N --drive editor/tests/drive_pan.lua
+# Standalone directory packages (binary + lua/ + tests/ + assets/fonts/)
+make -C editor package-linux  # → build/cubeforge-raylib-linux/
+make -C editor package        # → build/cubeforge-raylib-win64/
+make -C editor package-d3d11  # → build/cubeforge-d3d11-win64/
+
+# Standalone ZIP archives
+make -C editor zip-all        # → build/cubeforge-raylib-linux.zip, cubeforge-raylib-win64.zip, cubeforge-d3d11-win64.zip
+
+# Primary Nix package derivation
+nix build                     # → result/bin/cubeforge + result/share/cubeforge/
+
+# Headless Verification Suites (no window focus required)
+make -C editor test           # 74/74 unit, logic, path, and icon checks
+make -C editor shot           # screenshot → build/shot.png
+make -C editor shot-drive     # 3D orbit tape → build/shot_orbit.png
+make -C editor shot-pan       # 2D pan tape → build/shot_pan.png
+make -C editor shot-paint     # 2D→3D paint tape → build/shot_paint3d.png
+make -C editor shot-win-resize# window resize invariants across 5 resolutions
 ```
 
+## Multi-Tier Asset & Lua Path Resolution (`src/app_paths.h`)
+Assets and Lua modules are resolved using a 6-tier hierarchy:
+1. **Environment Variables**: `CUBEFORGE_ASSETS_DIR`, `CUBEFORGE_LUA_DIR`, `FONT_LATIN`, `FONT_CJK`
+2. **Portable Executable Directory**: `<exe_dir>/assets/` and `<exe_dir>/lua/`
+3. **Current Working Directory**: `<cwd>/assets/`, `<cwd>/editor/lua/`, `<cwd>/lua/`
+4. **Linux FHS Relative Install**: `<exe_dir>/../share/cubeforge/assets/` and `../share/cubeforge/lua/`
+5. **User Profile Directory**: `$XDG_DATA_HOME/cubeforge/` (`~/.local/share/cubeforge/`) or `%LOCALAPPDATA%\cubeforge\`
+6. **System Install Directory**: `/usr/share/cubeforge/` and `/usr/local/share/cubeforge/`
+
+## User Configuration & Persistent Storage APIs (`lp.app.*`)
+- `lp.app.get_config_dir()`: User settings directory (`~/.config/cubeforge` on Linux, `%APPDATA%\cubeforge` on Windows)
+- `lp.app.get_data_dir()`: User application data (`~/.local/share/cubeforge` on Linux, `%LOCALAPPDATA%\cubeforge` on Windows)
+- `lp.app.get_projects_dir()`: Projects folder (`~/Documents/CubeForge/Projects` or `%USERPROFILE%\Documents\CubeForge\Projects`)
+- `lp.app.save_user_file(filename, content, [sub_dir])`: Atomically saves persistent files in user config/data dir
+- `lp.app.load_user_file(filename, [sub_dir])`: Reads persistent file from user config/data dir
+- `lp.app.resolve_asset(rel_path, [env_override])`: Returns fully resolved path to an asset file
+
+## Embedded FontAwesome 6 Icon System (`src/fa6/`)
+- Embedded binary FontAwesome 6 Solid TTF atlas (`fa_solid_900_compressed_data`) with zero runtime file dependencies.
+- Exposes `ig.icon.*` constants table to Lua (`CUBE`, `CYLINDER`, `EXTRUDE`, `MOVE`, `VERTEX`, `EDGE`, `FACE`, `PAINT`, `PALETTE`, `UNDO`, `REDO`, `EXPORT`, `FOLDER_OPEN`, `SUN`, `TRASH`, `GRIP`, `GEAR`, `SLIDERS`, `CAMERA`, etc.).
 ## Windows (mingw cross)
 
 Cross-compiles against `pkgsCross.mingwW64.raylib` 6.0. **The nixpkgs mingw

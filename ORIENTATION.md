@@ -107,13 +107,17 @@ evaluation. `--mode json` exposes model identity + usage for verification.
    - **Stack A (OpenGL 3.3)**: all gates passed but **+368 C++ lines** for 5 GPU features; deleted.
    - **Stack B (Raylib)**: all gates passed with **+89 C++ lines** of thin wrappers; became the template.
    - **VERDICT: Raylib wins (4.9 vs 4.4 weighted)** — 4× less C++ work for identical 3D features, 30% faster completion. Gemini stays in Lua.
-2. **Windows target verified (2026-08-19)**: `make win` + `make package` via `pkgsCross.mingwW64.raylib`; ships exe + libraylib.dll + glfw3.dll (raylib links GLFW dynamically) + libmcfgthread + lua/ + tests/ + fonts. 50/50 tests pass on the Windows host, headless shot works, live window render vision-verified. Windows 7+ compatible.
-3. **Low-res display & continuous resize verified (2026-08-19)**:
-   - Low-res screens (800x600, 640x480) safely clamped to work area bounds; window title bar never placed offscreen; responsive toolbar/sidebar layout.
-   - Win32 live continuous resize hook (`src/winclip.c` subclass) active during modal `DefWindowProc` sizing drag; 3D viewport & ImGui redraw live.
-   - Direct3D 11 backend evaluated on Windows host (3.91 ms/cycle, 100% live frames presented with DXGI flip model vs 6.54 ms for WGL).
-   - Linux nested compositor verified under Weston with both GL and Vulkan renderers.
-
+2. **Triple Backend Support & Continuous Resize (2026-08-19)**:
+   - **Linux (OpenGL 3.3)**: Packaged as primary Nix derivation (`nix build`) and standalone portable directory (`make package-linux` / `make zip-linux`).
+   - **Windows (OpenGL 3.3)**: Packaged via MinGW cross (`make win` / `make package` / `make zip-win`), Win7+ compatible.
+   - **Windows (Direct3D 11 DXGI Flip Model)**: Dedicated D3D11 backend (`make win-d3d11` / `make package-d3d11` / `make zip-d3d11`), 100% continuous live redraw during sizing loops with zero stretching.
+   - All 3 builds share common C++ wrappers (`app_paths.cpp`, `editor_theme.h`, `ig.cpp`, `fa6/`) and identical Lua codebase.
+3. **Embedded FontAwesome 6 Icon System & UI Polish (2026-08-19)**:
+   - Binary compressed FontAwesome 6 Solid TTF atlas embedded in binary with zero runtime font dependencies (`src/fa6/`).
+   - Exposes `ig.icon.*` constants table to Lua across toolbars, selection mode pills, and sidebar actions.
+4. **Multi-Tier Asset & User Storage System (`src/app_paths.h`)**:
+   - 6-tier asset resolution (environment variables, executable dir, cwd, FHS relative, user data dir, system `/usr/share/`).
+   - Cross-platform user config, project saving, and persistent storage APIs (`lp.app.get_config_dir`, `get_data_dir`, `get_documents_dir`, `get_projects_dir`, `save_user_file`, `load_user_file`).
 ### Pending Work & Next Session Roadmap
 1. **Harder-spec re-eval** (textured materials, custom shaders, GPU picking) to confirm the raylib advantage widens with complexity.
 2. **Sync skills to deployed harness**: push updated skill .md files to Nix home-manager and active harness.

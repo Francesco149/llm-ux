@@ -36,17 +36,18 @@
             python3
             lua5_4
             git
+            zip
           ];
 
           buildInputs = with pkgs; [
             raylib
             libGL
             mesa
-            xorg.libX11
-            xorg.libXrandr
-            xorg.libXinerama
-            xorg.libXcursor
-            xorg.libXi
+            libx11
+            libxrandr
+            libxinerama
+            libxcursor
+            libxi
             inter
             ipafont
             stb
@@ -82,6 +83,47 @@
             echo "  build:    make -C editor        # windows cross"
             echo "            make -C editor linux  # native linux"
           '';
+        };
+
+        packages = rec {
+          cubeforge = pkgs.stdenv.mkDerivation {
+            pname = "cubeforge";
+            version = "1.0.0";
+            src = ./.;
+
+            nativeBuildInputs = [ pkgs.pkg-config pkgs.gnumake ];
+            buildInputs = with pkgs; [
+              raylib
+              libGL
+              mesa
+              libx11
+              libxrandr
+              libxinerama
+              libxcursor
+              libxi
+            ];
+
+            buildPhase = ''
+              make -C editor linux \
+                IMGUI_DIR=${imguiSrc} \
+                LUA_SRC=${luaSrc} \
+                RAYLIB_INC=${pkgs.raylib}/include \
+                RAYLIB_LIB=${pkgs.raylib}/lib \
+                FONT_LATIN=${pkgs.inter}/share/fonts/truetype/InterVariable.ttf \
+                FONT_CJK=${pkgs.ipafont}/share/fonts/truetype/ipag.ttf \
+                STB_INC=${pkgs.stb}/include/stb
+            '';
+
+            installPhase = ''
+              mkdir -p $out/bin $out/share/cubeforge/lua $out/share/cubeforge/tests $out/share/cubeforge/assets/fonts
+              cp build/cubeforge-raylib $out/bin/cubeforge
+              cp -r editor/lua/* $out/share/cubeforge/lua/
+              cp -r editor/tests/* $out/share/cubeforge/tests/
+              cp ${pkgs.inter}/share/fonts/truetype/InterVariable.ttf $out/share/cubeforge/assets/fonts/InterVariable.ttf
+              cp ${pkgs.ipafont}/share/fonts/truetype/ipag.ttf $out/share/cubeforge/assets/fonts/ipag.ttf
+            '';
+          };
+          default = cubeforge;
         };
 
         formatter = pkgs.nixfmt-rfc-style;

@@ -1,6 +1,8 @@
 // main.cpp — cubeforge-raylib entry point
 // Raylib for windowing + 3D, rlImGui for ImGui overlay, Lua for all logic
 #include "editor.h"
+#include "app_paths.h"
+#include "editor_theme.h"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -1438,14 +1440,8 @@ void app_log(const char* fmt, ...) {
 }
 
 void lua_init(const char* root_dir) {
-    // Layout-aware: dev tree has editor/lua/, packaged tree has lua/ directly.
-    char dev_dir[2048];
-    snprintf(dev_dir, sizeof(dev_dir), "%s/editor/lua", root_dir);
-    if (FileExists(dev_dir)) {
-        snprintf(lua_dir, sizeof(lua_dir), "%s", dev_dir);
-    } else {
-        snprintf(lua_dir, sizeof(lua_dir), "%s/lua", root_dir);
-    }
+    std::string l_dir = app_paths::resolve_lua_dir(root_dir);
+    snprintf(lua_dir, sizeof(lua_dir), "%s", l_dir.c_str());
 
     L_global = luaL_newstate();
     luaL_openlibs(L_global);
@@ -1466,6 +1462,8 @@ void lua_init(const char* root_dir) {
     lua_setfield(L_global, -2, "backend_name");
     lua_setfield(L_global, -2, "app");
     lua_setglobal(L_global, "lp");
+
+    app_paths::register_lua_bindings(L_global, "Raylib 6.0 (OpenGL 3.3)");
 
     ig_register(L_global);
     rl_register(L_global);
@@ -1529,106 +1527,10 @@ void lua_shutdown() {
 // and a Latin/Cyrillic primary font with a merged CJK fallback so every script
 // renders. Fonts load from the dev-shell env paths or assets/fonts/ (packaged).
 
-static const char* font_path_env(const char* env, const char* fallback) {
-    const char* p = getenv(env);
-    if (p && *p) return p;
-    return fallback;
-}
-
-
-static void resolve_font_path(char* out, size_t n, const char* env, const char* packaged_rel) {
-    const char* p = font_path_env(env, nullptr);
-    if (p) { snprintf(out, n, "%s", p); return; }
-    // packaged: exe dir or cwd + assets/fonts/
-    snprintf(out, n, "assets/fonts/%s", packaged_rel);
-    if (!FileExists(out)) {
-        snprintf(out, n, "%s/assets/fonts/%s", GetApplicationDirectory(), packaged_rel);
-    }
-}
-
-static void apply_modern_dark_theme() {
-    ImGuiStyle& s = ImGui::GetStyle();
-    s.WindowRounding    = 6.0f;
-    s.ChildRounding     = 4.0f;
-    s.FrameRounding     = 4.0f;
-    s.PopupRounding     = 6.0f;
-    s.ScrollbarRounding = 4.0f;
-    s.GrabRounding      = 3.0f;
-    s.TabRounding       = 4.0f;
-    s.WindowPadding     = ImVec2(8.0f, 8.0f);
-    s.FramePadding      = ImVec2(6.0f, 4.0f);
-    s.ItemSpacing       = ImVec2(6.0f, 5.0f);
-    s.ItemInnerSpacing  = ImVec2(4.0f, 4.0f);
-    s.IndentSpacing     = 14.0f;
-    s.ScrollbarSize     = 10.0f;
-    s.GrabMinSize       = 8.0f;
-
-    ImVec4* c = s.Colors;
-    c[ImGuiCol_WindowBg]             = ImVec4(0.09f, 0.09f, 0.11f, 1.00f);
-    c[ImGuiCol_ChildBg]              = ImVec4(0.12f, 0.13f, 0.16f, 1.00f);
-    c[ImGuiCol_PopupBg]              = ImVec4(0.11f, 0.11f, 0.14f, 1.00f);
-    c[ImGuiCol_Border]               = ImVec4(0.16f, 0.17f, 0.20f, 1.00f);
-    c[ImGuiCol_FrameBg]              = ImVec4(0.15f, 0.16f, 0.19f, 1.00f);
-    c[ImGuiCol_FrameBgHovered]       = ImVec4(0.21f, 0.23f, 0.27f, 1.00f);
-    c[ImGuiCol_FrameBgActive]        = ImVec4(0.26f, 0.28f, 0.33f, 1.00f);
-    c[ImGuiCol_CheckMark]            = ImVec4(0.96f, 0.62f, 0.04f, 1.00f);
-    c[ImGuiCol_SliderGrab]           = ImVec4(0.96f, 0.62f, 0.04f, 1.00f);
-    c[ImGuiCol_SliderGrabActive]     = ImVec4(1.00f, 0.78f, 0.55f, 1.00f);
-    c[ImGuiCol_Button]               = ImVec4(0.16f, 0.18f, 0.22f, 1.00f);
-    c[ImGuiCol_Header]               = ImVec4(0.20f, 0.23f, 0.28f, 1.00f);
-    c[ImGuiCol_HeaderHovered]        = ImVec4(0.25f, 0.29f, 0.35f, 1.00f);
-    c[ImGuiCol_HeaderActive]         = ImVec4(0.28f, 0.32f, 0.40f, 1.00f);
-    c[ImGuiCol_Separator]            = ImVec4(0.18f, 0.19f, 0.22f, 1.00f);
-    c[ImGuiCol_Text]                 = ImVec4(0.90f, 0.90f, 0.93f, 1.00f);
-    c[ImGuiCol_TextDisabled]         = ImVec4(0.50f, 0.52f, 0.58f, 1.00f);
-    c[ImGuiCol_TitleBg]              = ImVec4(0.12f, 0.13f, 0.16f, 1.00f);
-    c[ImGuiCol_TitleBgActive]        = ImVec4(0.16f, 0.18f, 0.22f, 1.00f);
-}
-
 static void setup_imgui_fonts_and_theme() {
     rlImGuiBeginInitImGui();
     apply_modern_dark_theme();
-
-    ImGuiIO& io = ImGui::GetIO();
-    ImFontConfig cfg;
-    cfg.PixelSnapH = true;
-
-    // Primary: Latin + Cyrillic + Greek + common symbols (Inter)
-    static const ImWchar latin_cyr[] = {
-        0x0020, 0x00FF,   // ASCII + Latin-1
-        0x0100, 0x017F,   // Latin Extended-A
-        0x0180, 0x024F,   // Latin Extended-B
-        0x1E00, 0x1EFF,   // Latin Extended Additional (Vietnamese)
-        0x0400, 0x052F,   // Cyrillic + Cyrillic Supplement
-        0x0370, 0x03FF,   // Greek + Coptic
-        0x2000, 0x206F,   // General Punctuation
-        0x20AC, 0x20AC,   // €
-        0x2190, 0x21FF,   // Arrows
-        0x2500, 0x25FF,   // Box Drawing / Block Elements
-        0,
-    };
-    char latin_path[1024], cjk_path[1024];
-    resolve_font_path(latin_path, sizeof(latin_path), "FONT_LATIN", "InterVariable.ttf");
-    resolve_font_path(cjk_path, sizeof(cjk_path), "FONT_CJK", "ipag.ttf");
-
-    ImFont* main_font = io.Fonts->AddFontFromFileTTF(latin_path, 16.0f, &cfg, latin_cyr);
-    if (main_font) io.FontDefault = main_font;  // default font wins otherwise
-
-    // Fallback: CJK (Han + Kana + fullwidth forms) merged into the primary font
-    static const ImWchar cjk_ranges[] = {
-        0x3000, 0x30FF,   // CJK Symbols/Punctuation, Hiragana, Katakana
-        0x31F0, 0x31FF,   // Katakana Phonetic Extensions
-        0x3400, 0x4DBF,   // CJK Extension A
-        0x4E00, 0x9FFF,   // CJK Unified Ideographs
-        0xF900, 0xFAFF,   // CJK Compatibility Ideographs
-        0xFF00, 0xFFEF,   // Fullwidth Forms
-        0,
-    };
-    ImFontConfig mcfg;
-    mcfg.MergeMode = true;
-    mcfg.GlyphMinAdvanceX = 16.0f;
-    io.Fonts->AddFontFromFileTTF(cjk_path, 16.0f, &mcfg, cjk_ranges);
-
+    build_imgui_font_atlas();
     rlImGuiEndInitImGui();
 }
 

@@ -76,6 +76,33 @@ ok(type(rl.set_target_fps) == "function", "rl.set_target_fps")
 ok(type(rl.get_target_fps) == "function", "rl.get_target_fps")
 ok(type(rl.get_monitor_refresh_rate) == "function", "rl.get_monitor_refresh_rate")
 ok(type(ig.plot_lines) == "function", "ig.plot_lines")
+ok(type(ig.icon) == "table", "ig.icon table exists")
+ok(type(ig.icon.CUBE) == "string", "ig.icon.CUBE is string")
+ok(type(ig.icon.EXTRUDE) == "string", "ig.icon.EXTRUDE is string")
+ok(type(ig.icon.UNDO) == "string", "ig.icon.UNDO is string")
+ok(type(ig.icon.PAINT) == "string", "ig.icon.PAINT is string")
+ok(type(ig.icon.GRIP) == "string", "ig.icon.GRIP is string")
+ok(type(lp.app.get_config_dir) == "function", "lp.app.get_config_dir")
+ok(type(lp.app.get_data_dir) == "function", "lp.app.get_data_dir")
+ok(type(lp.app.get_documents_dir) == "function", "lp.app.get_documents_dir")
+ok(type(lp.app.get_projects_dir) == "function", "lp.app.get_projects_dir")
+ok(type(lp.app.save_user_file) == "function", "lp.app.save_user_file")
+ok(type(lp.app.load_user_file) == "function", "lp.app.load_user_file")
+ok(type(lp.app.resolve_asset) == "function", "lp.app.resolve_asset")
+
+-- User settings & path persistence test
+local cfg_dir = lp.app.get_config_dir()
+ok(cfg_dir ~= nil and #cfg_dir > 0, "get_config_dir returns valid path (" .. tostring(cfg_dir) .. ")")
+local proj_dir = lp.app.get_projects_dir()
+ok(proj_dir ~= nil and #proj_dir > 0, "get_projects_dir returns valid path (" .. tostring(proj_dir) .. ")")
+
+local save_ok, save_path = lp.app.save_user_file("cubeforge_test_settings.json", '{"theme":"dark","version":1}')
+ok(save_ok == true, "save_user_file writes successfully")
+local loaded_str = lp.app.load_user_file("cubeforge_test_settings.json")
+ok(loaded_str ~= nil and loaded_str:find('"theme":"dark"') ~= nil, "load_user_file reads saved content")
+
+local resolved_font = lp.app.resolve_asset("fonts/InterVariable.ttf")
+ok(resolved_font ~= nil and #resolved_font > 0, "resolve_asset returns resolved font path")
 
 -- Behavior: canvas create → white; stamp paints; undo restores; export writes.
 local tid = tex.create(64, 64)

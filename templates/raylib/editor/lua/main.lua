@@ -62,6 +62,13 @@ end
 local function deg2rad(d) return d * math.pi / 180.0 end
 local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
 
+-- Icon lookup helper with safe fallback
+local function ic(name, fallback)
+    if ig.icon and ig.icon[name] then
+        return ig.icon[name] .. " "
+    end
+    return fallback and (fallback .. " ") or ""
+end
 -- ── Deferred Scene Setup (keeps --test GL-free) ─────────────────────────────
 local scene_ready = false
 local function setup_scene()
@@ -232,31 +239,31 @@ local function handle_hotkeys()
     local shift_down = rl.is_key_down(rl.key.LeftShift) or rl.is_key_down(rl.key.RightShift) or io.key_shift
 
     -- Undo: Ctrl+Z (and not shift) — canvas in 2D mode, mesh undo otherwise
-    if ctrl_down and not shift_down and (rl.is_key_pressed(rl.key.Z) or ig.is_key_pressed(ig.key.Z)) then
+    if ctrl_down and not shift_down and rl.is_key_pressed(rl.key.Z) then
         if doc.mode == 5 then doc.canvas_undo() else doc.perform_undo() end
         return
     end
 
     -- Redo: Ctrl+Y or Ctrl+Shift+Z
-    if (ctrl_down and (rl.is_key_pressed(rl.key.Y) or ig.is_key_pressed(ig.key.Y))) or
-       (ctrl_down and shift_down and (rl.is_key_pressed(rl.key.Z) or ig.is_key_pressed(ig.key.Z))) then
+    if (ctrl_down and rl.is_key_pressed(rl.key.Y)) or
+       (ctrl_down and shift_down and rl.is_key_pressed(rl.key.Z)) then
         if doc.mode == 5 then doc.canvas_redo() else doc.perform_redo() end
         return
     end
 
     -- OBJ Export: Ctrl+E
-    if ctrl_down and (rl.is_key_pressed(rl.key.E) or ig.is_key_pressed(ig.key.E)) then
+    if ctrl_down and rl.is_key_pressed(rl.key.E) then
         doc.export_obj("build/cubeforge_model.obj")
         return
     end
 
     -- Modal action confirms/cancels via keys
     if doc.action then
-        if rl.is_key_pressed(rl.key.Enter) or ig.is_key_pressed(ig.key.Enter) then
+        if rl.is_key_pressed(rl.key.Enter) then
             doc.confirm_action()
             return
         end
-        if rl.is_key_pressed(rl.key.Escape) or ig.is_key_pressed(ig.key.Escape) then
+        if rl.is_key_pressed(rl.key.Escape) then
             doc.cancel_action()
             return
         end
@@ -264,22 +271,20 @@ local function handle_hotkeys()
 
     -- Mode switching: 1, 2, 3, 4, 5, B (only if not typing in text input)
     if not io.want_text_input then
-        if rl.is_key_pressed(rl.key["1"]) or ig.is_key_pressed(ig.key["1"]) then
+        if rl.is_key_pressed(rl.key["1"]) then
             set_mode(1)
-        elseif rl.is_key_pressed(rl.key["2"]) or ig.is_key_pressed(ig.key["2"]) then
+        elseif rl.is_key_pressed(rl.key["2"]) then
             set_mode(2)
-        elseif rl.is_key_pressed(rl.key["3"]) or ig.is_key_pressed(ig.key["3"]) then
+        elseif rl.is_key_pressed(rl.key["3"]) then
             set_mode(3)
-        elseif rl.is_key_pressed(rl.key["4"]) or ig.is_key_pressed(ig.key["4"]) or
-               rl.is_key_pressed(rl.key.B) or ig.is_key_pressed(ig.key.B) then
+        elseif rl.is_key_pressed(rl.key["4"]) or rl.is_key_pressed(rl.key.B) then
             set_mode(4)
-        elseif rl.is_key_pressed(rl.key["5"]) or ig.is_key_pressed(ig.key["5"]) then
+        elseif rl.is_key_pressed(rl.key["5"]) then
             set_mode(5)
         end
 
         -- Extrude: E (when not ctrl; 3D modes only)
-        if not ctrl_down and doc.mode ~= 5 and
-           (rl.is_key_pressed(rl.key.E) or ig.is_key_pressed(ig.key.E)) then
+        if not ctrl_down and doc.mode ~= 5 and rl.is_key_pressed(rl.key.E) then
             if not doc.action then
                 local mx, my = rl.get_mouse_pos()
                 doc.start_extrude(mx, my)
@@ -287,8 +292,7 @@ local function handle_hotkeys()
         end
 
         -- Move / Grab: G (3D modes only)
-        if not ctrl_down and doc.mode ~= 5 and
-           (rl.is_key_pressed(rl.key.G) or ig.is_key_pressed(ig.key.G)) then
+        if not ctrl_down and doc.mode ~= 5 and rl.is_key_pressed(rl.key.G) then
             if not doc.action then
                 local mx, my = rl.get_mouse_pos()
                 doc.start_move(mx, my)
@@ -813,11 +817,11 @@ function lp_frame()
     local tb_flags = 1 + 2 + 32 -- NoTitleBar | NoResize | NoSavedSettings
     ig.window("##top_toolbar", tb_flags, function()
         -- Primitives
-        if ig.button("+ Box") then
+        if ig.button(ic("CUBE", "+") .. "Box") then
             doc.add_box()
         end
         ig.same_line()
-        if ig.button("+ Cylinder") then
+        if ig.button(ic("CYLINDER", "+") .. "Cylinder") then
             doc.add_cylinder()
         end
 
@@ -832,7 +836,7 @@ function lp_frame()
             or (doc.selected_face_idx ~= nil)
 
         if not can_extrude then ig.begin_disabled(true) end
-        if ig.button("Extrude (E)") then
+        if ig.button(ic("EXTRUDE", "") .. "Extrude (E)") then
             local mx, my = rl.get_mouse_pos()
             doc.start_extrude(mx, my)
         end
@@ -840,7 +844,7 @@ function lp_frame()
 
         ig.same_line()
         if not can_move then ig.begin_disabled(true) end
-        if ig.button("Move (G)") then
+        if ig.button(ic("MOVE", "") .. "Move (G)") then
             local mx, my = rl.get_mouse_pos()
             doc.start_move(mx, my)
         end
@@ -855,7 +859,7 @@ function lp_frame()
             and (doc.canvas.tex_id ~= nil and lp.tex.can_undo(doc.canvas.tex_id))
             or undo.can_undo()
         if not can_u then ig.begin_disabled(true) end
-        if ig.button("Undo") then
+        if ig.button(ic("UNDO", "") .. "Undo") then
             if canvas_mode then doc.canvas_undo() else doc.perform_undo() end
         end
         if not can_u then ig.end_disabled() end
@@ -865,7 +869,7 @@ function lp_frame()
             and (doc.canvas.tex_id ~= nil and lp.tex.can_redo(doc.canvas.tex_id))
             or undo.can_redo()
         if not can_r then ig.begin_disabled(true) end
-        if ig.button("Redo") then
+        if ig.button(ic("REDO", "") .. "Redo") then
             if canvas_mode then doc.canvas_redo() else doc.perform_redo() end
         end
         if not can_r then ig.end_disabled() end
@@ -875,7 +879,7 @@ function lp_frame()
         ig.same_line()
 
         -- Export OBJ
-        if ig.button("Export OBJ") then
+        if ig.button(ic("EXPORT", "") .. "Export OBJ") then
             doc.export_obj("build/cubeforge_model.obj")
         end
     end)
@@ -942,12 +946,18 @@ function lp_frame()
         ig.same_line()
         ig.text_colored("v1.0", 0.5, 0.5, 0.55, 1.0)
         ig.same_line(panel_w - 118)
-        ig.text_colored("║ drag edge", 0.45, 0.47, 0.52, 1.0)
+        ig.text_colored(ic("GRIP", "|") .. "drag edge", 0.45, 0.47, 0.52, 1.0)
         ig.separator()
 
         -- Selection Mode Pills (1..4 = 3D, 5 = 2D texture paint)
         ig.text("Selection Mode:")
-        local mode_names = { "1: Vertex", "2: Edge", "3: Face", "4: Vert Paint", "5: Tex Paint" }
+        local mode_names = {
+            ic("VERTEX", "") .. "1: Vertex",
+            ic("EDGE", "") .. "2: Edge",
+            ic("FACE", "") .. "3: Face",
+            ic("PAINT", "") .. "4: Vert Paint",
+            ic("PALETTE", "") .. "5: Tex Paint"
+        }
         for m = 1, 5 do
             if m == 2 or m == 4 then ig.same_line() end  -- 2 per row
             local is_active = (doc.mode == m)
@@ -973,7 +983,7 @@ function lp_frame()
             or (doc.selected_face_idx ~= nil)
 
         if not can_extrude then ig.begin_disabled(true) end
-        if ig.button("Extrude (E)", 120, 28) then
+        if ig.button(ic("EXTRUDE", "") .. "Extrude (E)", 126, 28) then
             local mx, my = rl.get_mouse_pos()
             doc.start_extrude(mx, my)
         end
@@ -981,7 +991,7 @@ function lp_frame()
 
         ig.same_line()
         if not can_move then ig.begin_disabled(true) end
-        if ig.button("Move (G)", 120, 28) then
+        if ig.button(ic("MOVE", "") .. "Move (G)", 126, 28) then
             local mx, my = rl.get_mouse_pos()
             doc.start_move(mx, my)
         end
@@ -1037,7 +1047,7 @@ function lp_frame()
             end)
             ig.text_colored("Texture → Cube (2D↔3D)", 0.95, 0.7, 0.2, 1.0)
             ig.text_colored("Drop · Ctrl+V · Open — import an image", 0.6, 0.65, 0.7, 1.0)
-            if ig.button("Load Texture…") then
+            if ig.button(ic("FOLDER_OPEN", "") .. "Load Texture…") then
                 local path = lp.app.open_file_dialog()
                 if path then
                     import_image(path)
@@ -1046,10 +1056,10 @@ function lp_frame()
                 end
             end
             ig.same_line()
-            if ig.button("Clear Canvas") then doc.canvas_clear() end
-            if ig.button("Canvas Undo") then doc.canvas_undo() end
+            if ig.button(ic("TRASH", "") .. "Clear Canvas") then doc.canvas_clear() end
+            if ig.button(ic("UNDO", "") .. "Canvas Undo") then doc.canvas_undo() end
             ig.same_line()
-            if ig.button("Canvas Redo") then doc.canvas_redo() end
+            if ig.button(ic("REDO", "") .. "Canvas Redo") then doc.canvas_redo() end
         else
             ig.text_colored("Canvas created on first 3D frame", 0.5, 0.5, 0.55, 1.0)
         end
