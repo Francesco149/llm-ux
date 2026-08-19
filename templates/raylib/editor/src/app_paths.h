@@ -6,6 +6,14 @@
 
 struct lua_State;
 
+#ifndef APP_NAME
+#define APP_NAME "cubeforge"
+#endif
+
+#ifndef APP_DISPLAY_NAME
+#define APP_DISPLAY_NAME "CubeForge"
+#endif
+
 namespace app_paths {
 
 // Multi-tier asset resolution:
@@ -21,10 +29,14 @@ std::string resolve_asset(const char* rel_path, const char* env_override = nullp
 std::string resolve_lua_dir(const char* root_override = nullptr);
 
 // Platform user directories (ensured to exist upon request):
-std::string get_user_config_dir(const char* app_name = "cubeforge");
-std::string get_user_data_dir(const char* app_name = "cubeforge");
-std::string get_user_documents_dir(const char* app_name = "cubeforge");
-std::string get_user_projects_dir(const char* app_name = "cubeforge");
+std::string get_app_name();
+std::string get_app_title();
+void set_app_name(const char* name, const char* title = nullptr);
+
+std::string get_user_config_dir(const char* app_name = nullptr);
+std::string get_user_data_dir(const char* app_name = nullptr);
+std::string get_user_documents_dir(const char* app_name = nullptr);
+std::string get_user_projects_dir(const char* app_name = nullptr);
 
 // Filesystem helpers
 bool ensure_dir(const std::string& path);

@@ -22,6 +22,16 @@ extern "C" {
 }
 
 namespace app_paths {
+static std::string s_app_name = APP_NAME;
+static std::string s_app_title = APP_DISPLAY_NAME;
+
+std::string get_app_name() { return s_app_name; }
+std::string get_app_title() { return s_app_title; }
+void set_app_name(const char* name, const char* title) {
+    if (name && *name) s_app_name = name;
+    if (title && *title) s_app_title = title;
+    else if (name && *name) s_app_title = name;
+}
 
 static std::string get_exe_dir() {
     char buf[2048] = {};
@@ -123,12 +133,18 @@ std::string resolve_asset(const char* rel_path, const char* env_override) {
         const char* val = getenv(env_override);
         if (val && *val && file_exists(val)) return std::string(val);
     }
-    const char* assets_env = getenv("CUBEFORGE_ASSETS_DIR");
+    std::string env_assets_key = s_app_name + "_ASSETS_DIR";
+    for (char& c : env_assets_key) c = toupper(c);
+    const char* assets_env = getenv(env_assets_key.c_str());
+    if (!assets_env) assets_env = getenv("CUBEFORGE_ASSETS_DIR");
     if (assets_env && *assets_env) {
         std::string cand = std::string(assets_env) + "/" + rel_path;
         if (file_exists(cand)) return cand;
     }
-    const char* data_env = getenv("CUBEFORGE_DATA_DIR");
+    std::string env_data_key = s_app_name + "_DATA_DIR";
+    for (char& c : env_data_key) c = toupper(c);
+    const char* data_env = getenv(env_data_key.c_str());
+    if (!data_env) data_env = getenv("CUBEFORGE_DATA_DIR");
     if (data_env && *data_env) {
         std::string cand = std::string(data_env) + "/assets/" + rel_path;
         if (file_exists(cand)) return cand;
@@ -154,13 +170,13 @@ std::string resolve_asset(const char* rel_path, const char* env_override) {
 
     // 4. Linux FHS install path (<exe_dir>/../share/cubeforge/assets/...)
     {
-        std::string cand = exe_dir + "/../share/cubeforge/assets/" + rel_path;
+        std::string cand = exe_dir + "/../share/" + s_app_name + "/assets/" + rel_path;
         if (file_exists(cand)) return cand;
     }
 
     // 5. User data directory (~/.local/share/cubeforge/assets/... or %LOCALAPPDATA%\cubeforge\assets\...)
     {
-        std::string user_data = get_user_data_dir("cubeforge");
+        std::string user_data = get_user_data_dir(s_app_name.c_str());
         if (!user_data.empty()) {
             std::string cand = user_data + "/assets/" + rel_path;
             if (file_exists(cand)) return cand;
@@ -169,10 +185,9 @@ std::string resolve_asset(const char* rel_path, const char* env_override) {
 
     // 6. System install directory (/usr/share/cubeforge/assets/...)
     {
-        std::string cand = std::string("/usr/share/cubeforge/assets/") + rel_path;
+        std::string cand = std::string("/usr/share/") + s_app_name + "/assets/" + rel_path;
         if (file_exists(cand)) return cand;
-        cand = std::string("/usr/local/share/cubeforge/assets/") + rel_path;
-        if (file_exists(cand)) return cand;
+        cand = std::string("/usr/local/share/") + s_app_name + "/assets/" + rel_path;
     }
 
     // Fallback: return default relative path
@@ -180,7 +195,10 @@ std::string resolve_asset(const char* rel_path, const char* env_override) {
 }
 
 std::string resolve_lua_dir(const char* root_override) {
-    const char* env_dir = getenv("CUBEFORGE_LUA_DIR");
+    std::string env_lua_key = s_app_name + "_LUA_DIR";
+    for (char& c : env_lua_key) c = toupper(c);
+    const char* env_dir = getenv(env_lua_key.c_str());
+    if (!env_dir) env_dir = getenv("CUBEFORGE_LUA_DIR");
     if (env_dir && *env_dir && dir_exists(env_dir)) {
         return std::string(env_dir);
     }
@@ -214,14 +232,14 @@ std::string resolve_lua_dir(const char* root_override) {
 
     // 3. Linux FHS install path: <exe_dir>/../share/cubeforge/lua
     {
-        std::string cand = exe_dir + "/../share/cubeforge/lua";
+        std::string cand = exe_dir + "/../share/" + s_app_name + "/lua";
         if (dir_exists(cand)) return cand;
     }
 
     // 4. System share path
     {
-        if (dir_exists("/usr/share/cubeforge/lua")) return "/usr/share/cubeforge/lua";
-        if (dir_exists("/usr/local/share/cubeforge/lua")) return "/usr/local/share/cubeforge/lua";
+        if (dir_exists("/usr/share/" + s_app_name + "/lua")) return "/usr/share/" + s_app_name + "/lua";
+        if (dir_exists("/usr/local/share/" + s_app_name + "/lua")) return "/usr/local/share/" + s_app_name + "/lua";
     }
 
     return "lua";
@@ -237,7 +255,7 @@ std::string get_user_config_dir(const char* app_name) {
         const char* userprofile = getenv("USERPROFILE");
         base = userprofile ? (std::string(userprofile) + "\\AppData\\Roaming") : ".";
     }
-    std::string full = base + "\\" + (app_name ? app_name : "cubeforge");
+    std::string full = base + "\\" + (app_name ? app_name : s_app_name);
 #else
     const char* xdg_config = getenv("XDG_CONFIG_HOME");
     if (xdg_config && *xdg_config) {
@@ -246,7 +264,7 @@ std::string get_user_config_dir(const char* app_name) {
         const char* home = getenv("HOME");
         base = home ? (std::string(home) + "/.config") : ".";
     }
-    std::string full = base + "/" + (app_name ? app_name : "cubeforge");
+    std::string full = base + "/" + (app_name ? app_name : s_app_name);
 #endif
     ensure_dir(full);
     return full;
@@ -262,7 +280,7 @@ std::string get_user_data_dir(const char* app_name) {
         const char* appdata = getenv("APPDATA");
         base = appdata ? appdata : ".";
     }
-    std::string full = base + "\\" + (app_name ? app_name : "cubeforge");
+    std::string full = base + "\\" + (app_name ? app_name : s_app_name);
 #else
     const char* xdg_data = getenv("XDG_DATA_HOME");
     if (xdg_data && *xdg_data) {
@@ -271,7 +289,7 @@ std::string get_user_data_dir(const char* app_name) {
         const char* home = getenv("HOME");
         base = home ? (std::string(home) + "/.local/share") : ".";
     }
-    std::string full = base + "/" + (app_name ? app_name : "cubeforge");
+    std::string full = base + "/" + (app_name ? app_name : s_app_name);
 #endif
     ensure_dir(full);
     return full;
@@ -282,7 +300,7 @@ std::string get_user_documents_dir(const char* app_name) {
 #ifdef _WIN32
     const char* userprofile = getenv("USERPROFILE");
     base = userprofile ? (std::string(userprofile) + "\\Documents") : ".";
-    std::string full = base + "\\" + (app_name ? app_name : "CubeForge");
+    std::string full = base + "\\" + (app_name ? app_name : s_app_title);
 #else
     const char* xdg_docs = getenv("XDG_DOCUMENTS_DIR");
     if (xdg_docs && *xdg_docs) {
@@ -291,7 +309,7 @@ std::string get_user_documents_dir(const char* app_name) {
         const char* home = getenv("HOME");
         base = home ? (std::string(home) + "/Documents") : ".";
     }
-    std::string full = base + "/" + (app_name ? app_name : "CubeForge");
+    std::string full = base + "/" + (app_name ? app_name : s_app_title);
 #endif
     ensure_dir(full);
     return full;
@@ -310,34 +328,50 @@ std::string get_user_projects_dir(const char* app_name) {
 
 // ── Lua Bindings ─────────────────────────────────────────────────────────────
 
+static int l_app_get_app_name(lua_State* L) {
+    lua_pushstring(L, s_app_name.c_str());
+    return 1;
+}
+
+static int l_app_get_app_title(lua_State* L) {
+    lua_pushstring(L, s_app_title.c_str());
+    return 1;
+}
+
+static int l_app_set_app_name(lua_State* L) {
+    const char* name = luaL_checkstring(L, 1);
+    const char* title = lua_isnoneornil(L, 2) ? nullptr : luaL_checkstring(L, 2);
+    set_app_name(name, title);
+    return 0;
+}
+
 static int l_app_get_config_dir(lua_State* L) {
-    const char* app = lua_isnoneornil(L, 1) ? "cubeforge" : luaL_checkstring(L, 1);
+    const char* app = lua_isnoneornil(L, 1) ? nullptr : luaL_checkstring(L, 1);
     std::string dir = get_user_config_dir(app);
     lua_pushstring(L, dir.c_str());
     return 1;
 }
 
 static int l_app_get_data_dir(lua_State* L) {
-    const char* app = lua_isnoneornil(L, 1) ? "cubeforge" : luaL_checkstring(L, 1);
+    const char* app = lua_isnoneornil(L, 1) ? nullptr : luaL_checkstring(L, 1);
     std::string dir = get_user_data_dir(app);
     lua_pushstring(L, dir.c_str());
     return 1;
 }
 
 static int l_app_get_documents_dir(lua_State* L) {
-    const char* app = lua_isnoneornil(L, 1) ? "CubeForge" : luaL_checkstring(L, 1);
+    const char* app = lua_isnoneornil(L, 1) ? nullptr : luaL_checkstring(L, 1);
     std::string dir = get_user_documents_dir(app);
     lua_pushstring(L, dir.c_str());
     return 1;
 }
 
 static int l_app_get_projects_dir(lua_State* L) {
-    const char* app = lua_isnoneornil(L, 1) ? "CubeForge" : luaL_checkstring(L, 1);
+    const char* app = lua_isnoneornil(L, 1) ? nullptr : luaL_checkstring(L, 1);
     std::string dir = get_user_projects_dir(app);
     lua_pushstring(L, dir.c_str());
     return 1;
 }
-
 static int l_app_ensure_dir(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
     bool ok = ensure_dir(path);
@@ -350,7 +384,7 @@ static int l_app_save_user_file(lua_State* L) {
     const char* content = luaL_checkstring(L, 2);
     const char* sub = lua_isnoneornil(L, 3) ? "config" : luaL_checkstring(L, 3);
 
-    std::string base = (strcmp(sub, "data") == 0) ? get_user_data_dir("cubeforge") : get_user_config_dir("cubeforge");
+    std::string base = (strcmp(sub, "data") == 0) ? get_user_data_dir(s_app_name.c_str()) : get_user_config_dir(s_app_name.c_str());
 #ifdef _WIN32
     std::string full = base + "\\" + filename;
 #else
@@ -366,7 +400,7 @@ static int l_app_load_user_file(lua_State* L) {
     const char* filename = luaL_checkstring(L, 1);
     const char* sub = lua_isnoneornil(L, 2) ? "config" : luaL_checkstring(L, 2);
 
-    std::string base = (strcmp(sub, "data") == 0) ? get_user_data_dir("cubeforge") : get_user_config_dir("cubeforge");
+    std::string base = (strcmp(sub, "data") == 0) ? get_user_data_dir(s_app_name.c_str()) : get_user_config_dir(s_app_name.c_str());
 #ifdef _WIN32
     std::string full = base + "\\" + filename;
 #else
@@ -403,6 +437,15 @@ void register_lua_bindings(lua_State* L, const char* backend_name) {
         lua_pop(L, 1);
         lua_newtable(L);
     }
+    lua_pushcfunction(L, l_app_get_app_name);
+    lua_setfield(L, -2, "get_app_name");
+
+    lua_pushcfunction(L, l_app_get_app_title);
+    lua_setfield(L, -2, "get_app_title");
+
+    lua_pushcfunction(L, l_app_set_app_name);
+    lua_setfield(L, -2, "set_app_name");
+
     lua_pushcfunction(L, l_app_get_config_dir);
     lua_setfield(L, -2, "get_config_dir");
 
