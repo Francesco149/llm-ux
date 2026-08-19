@@ -293,6 +293,15 @@ static int l_rl_get_screen_size(lua_State* L) {
     lua_pushinteger(L, GetScreenHeight());
     return 2;
 }
+static int l_rl_take_screenshot(lua_State* L) {
+    const char* path = luaL_checkstring(L, 1);
+    TakeScreenshot(path);
+    char dup[2048];
+    snprintf(dup, sizeof(dup), "screenshot%03d.png", 0);
+    if (strcmp(dup, path) != 0 && FileExists(dup)) remove(dup);
+    return 0;
+}
+
 
 static int l_rl_set_window_size(lua_State* L) {
     int w = (int)luaL_checkinteger(L, 1);
@@ -1180,6 +1189,7 @@ static void rl_register(lua_State* L) {
     RR(set_window_position);
     RR(get_window_position);
     RR(set_mouse_cursor);
+    RR(take_screenshot);
     RR(get_clipboard_text);
     RR(clipboard_file_path);
     RR(is_file_dropped);

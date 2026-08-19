@@ -152,6 +152,10 @@ shot-resize: linux
 shot-browser: linux
 	cd .. && ./build/cubeforge-raylib --shot build/shot_browser.png --frames 12 --drive editor/tests/drive_browser.lua
 
+# Headless drive + capture: autonomous dynamic window resize test across resolutions
+shot-win-resize: linux
+	cd .. && ./build/cubeforge-raylib --shot build/shot_win_resize.png --frames 55 --drive editor/tests/drive_window_resize.lua
+
 # Headless boot + binding checks
 test: linux
 	cd .. && ./build/cubeforge-raylib --test
@@ -162,4 +166,4 @@ win-run: package
 clean:
 	rm -rf $(OBJ) $(WIN_OBJ) $(OUT) $(WIN_OUT) $(BUILD)/cubeforge-raylib-win64
 
-.PHONY: linux win package clean run shot shot-drive shot-pan shot-paint shot-import shot-resize shot-browser test win-run
+.PHONY: linux win package clean run shot shot-drive shot-pan shot-paint shot-import shot-resize shot-browser shot-win-resize test win-run
