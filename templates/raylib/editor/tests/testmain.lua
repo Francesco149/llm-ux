@@ -70,6 +70,8 @@ ok(type(rl.set_window_size) == "function", "rl.set_window_size")
 ok(type(rl.get_monitor_size) == "function", "rl.get_monitor_size")
 ok(type(rl.set_window_position) == "function", "rl.set_window_position")
 ok(type(rl.get_window_position) == "function", "rl.get_window_position")
+ok(type(rl.set_lighting_enabled) == "function", "rl.set_lighting_enabled")
+ok(type(rl.is_lighting_enabled) == "function", "rl.is_lighting_enabled")
 
 -- Behavior: canvas create → white; stamp paints; undo restores; export writes.
 local tid = tex.create(64, 64)

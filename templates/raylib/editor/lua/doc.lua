@@ -14,7 +14,9 @@ local doc = {
         color = { 240, 120, 50 }, -- RGB 0-255
         strength = 0.9,
         hardness = 0.6,           -- 0 = fully feathered, 1 = hard edge (shared 2D/3D)
+        spacing = 0.20,           -- 0.05 = continuous line, 0.50 = sketchy/spaced stamps
     },
+    lighting_enabled = false,     -- 3D lighting toggle (consistent across backends)
     action = nil, -- nil, "extrude", "move"
     action_orig = nil,
     action_data = nil,
@@ -65,12 +67,13 @@ function doc.snapshot()
         selected_face_idx = doc.selected_face_idx,
         selected_vert_idx = doc.selected_vert_idx,
         selected_edge = doc.selected_edge and { vi1 = doc.selected_edge.vi1, vi2 = doc.selected_edge.vi2, face_idx = doc.selected_edge.face_idx },
-        mode = doc.mode,
+        lighting_enabled = doc.lighting_enabled,
         brush = {
             radius = doc.brush.radius,
             color = { doc.brush.color[1], doc.brush.color[2], doc.brush.color[3] },
             strength = doc.brush.strength,
             hardness = doc.brush.hardness,
+            spacing = doc.brush.spacing or 0.20,
         },
     }
 end
@@ -87,6 +90,10 @@ function doc.restore(snap)
     doc.selected_vert_idx = snap.selected_vert_idx
     doc.selected_edge = snap.selected_edge
     doc.mode = snap.mode or doc.mode
+    if snap.lighting_enabled ~= nil then
+        doc.lighting_enabled = snap.lighting_enabled
+        if lp.rl.set_lighting_enabled then lp.rl.set_lighting_enabled(doc.lighting_enabled) end
+    end
     if snap.brush then
         doc.brush.radius = snap.brush.radius or doc.brush.radius
         doc.brush.color = {
@@ -95,6 +102,8 @@ function doc.restore(snap)
             snap.brush.color[3] or doc.brush.color[3],
         }
         doc.brush.strength = snap.brush.strength or doc.brush.strength
+        doc.brush.hardness = snap.brush.hardness or doc.brush.hardness
+        doc.brush.spacing = snap.brush.spacing or doc.brush.spacing or 0.20
     end
     doc.dirty = true
     -- Undo/redo restores geometry; if GL is live, rebuild the GPU model so
@@ -560,33 +569,48 @@ function doc.brush_px()
     return (doc.brush.radius or 1.2) * 32.0
 end
 
--- Paint one stroke sample at world-space (wx, wy). Stroke start pushes an
--- undo entry; samples are interpolated for smooth strokes.
 function doc.canvas_stroke(wx, wy)
     local tid = doc.canvas.tex_id
     if not tid then return false end
+    local px = doc.brush_px()
+    local bc = doc.brush.color
+    local strength = doc.brush.strength or 0.9
+    local alpha = math.floor(255.0 * math.max(0.0, math.min(1.0, strength)))
+    local hardness = doc.brush.hardness or 0.6
+    local spacing = math.max(0.04, math.min(1.0, doc.brush.spacing or 0.20))
+    local step_dist = math.max(0.5, px * spacing)
+
     if not doc.canvas.stroke_active then
         lp.tex.push_undo(tid)
         doc.canvas.stroke_active = true
         doc.canvas.last_stamp = { wx, wy }
+        doc.canvas.rem_dist = 0
+        lp.tex.stamp(tid, wx, wy, px, hardness, bc[1], bc[2], bc[3], alpha)
+        doc.dirty = true
+        doc.status_msg = "Painting canvas"
+        return true
     end
-    local bc = doc.brush.color
-    local strength = doc.brush.strength
-    if not strength then strength = 0.9 end
-    local alpha = math.floor(255.0 * math.max(0.0, math.min(1.0, strength)))
-    local px = doc.brush_px()
+
     local lx, ly = doc.canvas.last_stamp[1], doc.canvas.last_stamp[2]
-    doc.canvas.last_stamp = { wx, wy }
     local dist = math.sqrt((wx - lx) ^ 2 + (wy - ly) ^ 2)
-    local steps = math.min(16, math.max(1, math.floor(dist / (px * 0.35))))
-    for i = 0, steps do
-        local t = i / steps
-        lp.tex.stamp(tid,
-            lx + (wx - lx) * t, ly + (wy - ly) * t,
-            px, doc.brush.hardness or 0.6, bc[1], bc[2], bc[3], alpha)
+    if dist < 1e-4 then return true end
+
+    local total = dist + (doc.canvas.rem_dist or 0)
+    local num_steps = math.floor(total / step_dist)
+    doc.canvas.rem_dist = total - (num_steps * step_dist)
+
+    if num_steps > 0 then
+        for i = 1, num_steps do
+            local cur_d = (i * step_dist) - (total - dist)
+            local t = math.max(0.0, math.min(1.0, cur_d / dist))
+            local sx = lx + (wx - lx) * t
+            local sy = ly + (wy - ly) * t
+            lp.tex.stamp(tid, sx, sy, px, hardness, bc[1], bc[2], bc[3], alpha)
+        end
+        doc.canvas.last_stamp = { wx, wy }
+        doc.dirty = true
+        doc.status_msg = "Painting canvas"
     end
-    doc.dirty = true
-    doc.status_msg = "Painting canvas"
     return true
 end
 

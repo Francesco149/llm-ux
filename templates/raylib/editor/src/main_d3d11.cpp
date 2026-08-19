@@ -226,11 +226,12 @@ static ID3D11Texture2D*         g_depth_stencil_tex = nullptr;
 static ID3D11DepthStencilView*  g_depth_stencil_view = nullptr;
 static ID3D11DepthStencilState* g_depth_state_3d = nullptr;
 static ID3D11DepthStencilState* g_depth_state_2d = nullptr;
+static ID3D11DepthStencilState* g_depth_state_overlay = nullptr;
 static ID3D11RasterizerState*   g_raster_solid = nullptr;
 static ID3D11RasterizerState*   g_raster_wire = nullptr;
 static ID3D11BlendState*        g_blend_state = nullptr;
 static ID3D11SamplerState*      g_sampler_state = nullptr;
-
+static bool                     g_lighting_enabled = false;
 static ID3D11VertexShader*      g_vs_3d = nullptr;
 static ID3D11PixelShader*       g_ps_3d = nullptr;
 static ID3D11InputLayout*       g_layout_3d = nullptr;
@@ -397,10 +398,15 @@ static void draw_dynamic_triangles(const D3DVertex* verts, size_t count, int tex
     SceneCBuffer cb = {};
     cb.mvp = mvp;
     cb.model = mat4_identity();
-    cb.ambient = v4(0.35f, 0.35f, 0.38f, 1.0f);
-    cb.sun_dir = v4(-0.4f, -1.0f, -0.6f, 0.0f);
-    cb.sun_color = v4(0.9f, 0.88f, 0.82f, 1.0f);
-    cb.color_tint = tint;
+    if (g_lighting_enabled) {
+        cb.ambient = v4(0.35f, 0.35f, 0.38f, 1.0f);
+        cb.sun_dir = v4(-0.4f, -1.0f, -0.6f, 0.0f);
+        cb.sun_color = v4(0.9f, 0.88f, 0.82f, 1.0f);
+    } else {
+        cb.ambient = v4(1.0f, 1.0f, 1.0f, 1.0f);
+        cb.sun_dir = v4(0.0f, 0.0f, 0.0f, 0.0f);
+        cb.sun_color = v4(0.0f, 0.0f, 0.0f, 1.0f);
+    }
     cb.use_texture = (tex_id > 0 && tex_id <= (int)g_textures.size() && g_textures[tex_id - 1].srv != nullptr) ? 1 : 0;
 
     g_d3d_context->UpdateSubresource(g_cbuffer_scene, 0, nullptr, &cb, 0, 0);
@@ -494,7 +500,7 @@ static void draw_dynamic_triangles_unlit(const D3DVertex* verts, size_t count, V
     g_d3d_context->PSSetShader(g_ps_unlit, nullptr, 0);
 
     g_d3d_context->RSSetState(g_raster_solid);
-    g_d3d_context->OMSetDepthStencilState(g_depth_state_3d, 0);
+    g_d3d_context->OMSetDepthStencilState(g_depth_state_overlay, 0);
     g_d3d_context->OMSetBlendState(g_blend_state, nullptr, 0xffffffff);
 
     g_d3d_context->Draw((UINT)count, 0);
@@ -1020,10 +1026,15 @@ static int l_rl_draw_model(lua_State* L) {
 
     SceneCBuffer cb = {};
     cb.mvp = mvp;
-    cb.model = model_mat;
-    cb.ambient = v4(0.35f, 0.35f, 0.38f, 1.0f);
-    cb.sun_dir = v4(-0.4f, -1.0f, -0.6f, 0.0f);
-    cb.sun_color = v4(0.9f, 0.88f, 0.82f, 1.0f);
+    if (g_lighting_enabled) {
+        cb.ambient = v4(0.35f, 0.35f, 0.38f, 1.0f);
+        cb.sun_dir = v4(-0.4f, -1.0f, -0.6f, 0.0f);
+        cb.sun_color = v4(0.9f, 0.88f, 0.82f, 1.0f);
+    } else {
+        cb.ambient = v4(1.0f, 1.0f, 1.0f, 1.0f);
+        cb.sun_dir = v4(0.0f, 0.0f, 0.0f, 0.0f);
+        cb.sun_color = v4(0.0f, 0.0f, 0.0f, 1.0f);
+    }
     cb.color_tint = v4(r, g, b, a);
     cb.use_texture = (m.texture_id > 0 && m.texture_id <= (int)g_textures.size() && g_textures[m.texture_id - 1].srv != nullptr) ? 1 : 0;
 
@@ -1655,6 +1666,14 @@ static int l_rl_debug_material(lua_State* L) {
     lua_pushinteger(L, 0);
     return 2;
 }
+static int l_rl_set_lighting_enabled(lua_State* L) {
+    g_lighting_enabled = lua_toboolean(L, 1);
+    return 0;
+}
+static int l_rl_is_lighting_enabled(lua_State* L) {
+    lua_pushboolean(L, g_lighting_enabled);
+    return 1;
+}
 
 
 
@@ -1710,6 +1729,8 @@ static void rl_register(lua_State* L) {
     RR(set_mouse_cursor);
     RR(is_mouse_button_down);
     RR(is_mouse_button_pressed);
+    RR(set_lighting_enabled);
+    RR(is_lighting_enabled);
     RR(get_mouse_delta);
     RR(get_mouse_wheel);
     RR(get_mouse_pos);
@@ -2447,7 +2468,15 @@ static void app_init_d3d_pipeline() {
 
     dsd.DepthEnable = FALSE;
     dsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    dsd.DepthEnable = FALSE;
+    dsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
     g_d3d_device->CreateDepthStencilState(&dsd, &g_depth_state_2d);
+
+    // Overlay Depth Stencil State (Depth read / test enabled, NO depth write)
+    dsd.DepthEnable = TRUE;
+    dsd.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    dsd.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+    g_d3d_device->CreateDepthStencilState(&dsd, &g_depth_state_overlay);
 
     // Blend State
     D3D11_BLEND_DESC bld = {};

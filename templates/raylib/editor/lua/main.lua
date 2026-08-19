@@ -635,7 +635,7 @@ local function draw_mesh_overlays(mesh, is_active_mesh)
                     for i = 2, num_v - 1 do
                         local v1 = offset_pt(verts[fv[i]], norm, 0.002)
                         local v2 = offset_pt(verts[fv[i + 1]], norm, 0.002)
-                        rl.draw_triangle_3d(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z, 190, 225, 255, 75)
+                        rl.draw_triangle_3d(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z, 200, 230, 255, 95)
                     end
                 end
                 for i = 1, num_v do
@@ -646,7 +646,7 @@ local function draw_mesh_overlays(mesh, is_active_mesh)
                     if va and vb then
                         local p1 = offset_pt(va, norm, 0.003)
                         local p2 = offset_pt(vb, norm, 0.003)
-                        rl.draw_line_3d(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, 150, 210, 255, 170)
+                        rl.draw_line_3d(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, 160, 220, 255, 200)
                     end
                 end
             end
@@ -984,6 +984,8 @@ function lp_frame()
         local h_chg, new_hard = ig.slider_float("Hardness##brush", doc.brush.hardness, 0.0, 1.0)
         if h_chg then doc.brush.hardness = new_hard end
 
+        local sp_chg, new_sp = ig.slider_float("Spacing##brush", doc.brush.spacing or 0.20, 0.05, 0.60)
+        if sp_chg then doc.brush.spacing = new_sp end
         local bc = doc.brush.color
         local col_norm = { (bc[1] or 240) / 255.0, (bc[2] or 120) / 255.0, (bc[3] or 50) / 255.0 }
         -- color_edit3 returns (changed, r, g, b) — three numbers, NOT a table
@@ -1034,6 +1036,16 @@ function lp_frame()
             if ig.button("Canvas Redo") then doc.canvas_redo() end
         else
             ig.text_colored("Canvas created on first 3D frame", 0.5, 0.5, 0.55, 1.0)
+        end
+
+        ig.separator()
+
+        -- Viewport Display Controls (3D Lighting toggle)
+        ig.text("Viewport Display:")
+        local l_chg, new_l = ig.checkbox("3D Lighting (Sun Key Light)", doc.lighting_enabled or false)
+        if l_chg then
+            doc.lighting_enabled = new_l
+            if lp.rl.set_lighting_enabled then lp.rl.set_lighting_enabled(doc.lighting_enabled) end
         end
 
         ig.separator()

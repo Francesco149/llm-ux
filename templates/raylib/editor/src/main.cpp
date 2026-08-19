@@ -294,6 +294,16 @@ static int l_rl_get_screen_size(lua_State* L) {
     lua_pushinteger(L, GetScreenHeight());
     return 2;
 }
+static bool g_lighting_enabled = false;
+static int l_rl_set_lighting_enabled(lua_State* L) {
+    g_lighting_enabled = lua_toboolean(L, 1);
+    return 0;
+}
+static int l_rl_is_lighting_enabled(lua_State* L) {
+    lua_pushboolean(L, g_lighting_enabled);
+    return 1;
+}
+
 static int l_rl_take_screenshot(lua_State* L) {
     const char* path = luaL_checkstring(L, 1);
     TakeScreenshot(path);
@@ -1191,6 +1201,8 @@ static void rl_register(lua_State* L) {
     RR(get_window_position);
     RR(set_mouse_cursor);
     RR(take_screenshot);
+    RR(set_lighting_enabled);
+    RR(is_lighting_enabled);
     RR(get_clipboard_text);
     RR(clipboard_file_path);
     RR(is_file_dropped);
