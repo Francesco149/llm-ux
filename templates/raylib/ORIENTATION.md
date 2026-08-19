@@ -44,8 +44,8 @@ make -C editor shot         # headless screenshot → build/shot.png (hidden win
 make -C editor shot-drive   # 3D orbit tape → build/shot_orbit.png (camera moved)
 make -C editor shot-pan     # 2D pan tape → build/shot_pan.png (MMB pan moved cam2d)
 make -C editor shot-paint   # 2D→3D paint tape → build/shot_paint3d.png (painted cube)
+make -C editor shot-win-resize # dynamic window resize test → build/shot_win_resize.png
 make -C editor run          # interactive
-```
 
 CLI modes:
 ```sh
@@ -223,10 +223,16 @@ canvas is untouched.
   and raylib polls events exactly once per frame at `EndDrawing`. **Never
   add a second `PollInputEvents()`**: it clears the pressed-queues EndDrawing
   just filled → clicks landing mid-frame get dropped (intermittent
-  unresponsiveness; tried, reverted 2026-08-19). Any remaining stretch during
-  the drag is the platform drag loop blocking present (Windows GDI modal
-  resize / compositor) — do NOT force the viewport (`rlViewport` overrides
-  made it worse; also reverted).
+  unresponsiveness; tried, reverted 2026-08-19).
+- **Win32 live continuous resize hook**: on Windows, `DefWindowProc` enters a
+  modal sizing loop during window edge drags, pausing the main loop. A Win32
+  window subclass hook in `src/winclip.c` intercepts `WM_SIZING`, `WM_SIZE`,
+  and `WM_WINDOWPOSCHANGED` to invoke `app_on_live_resize()`, actively redrawing
+  the 3D viewport and ImGui UI at 60 FPS during the drag with zero freezing.
+- **Low-resolution display safety (800x600, 640x480)**: on displays smaller than
+  1280x800, window dimensions are clamped to the monitor workarea prior to
+  `InitWindow()`, and window coordinates are clamped so `x >= 0` and `y >= 0`.
+  The top toolbar and right sidebar dynamically re-layout without overlapping.
 - **Hover affordances**: every draggable region shows a cursor change
   (`lp.rl.set_mouse_cursor`) + a visual highlight. ALWAYS reset the cursor
   (`CURSOR_DEFAULT`) when the pointer leaves the region — a stuck resize
