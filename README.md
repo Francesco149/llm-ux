@@ -2,10 +2,24 @@
 
 > **The definitive framework, architectural doctrine, and skill suite for frontier and lightweight LLMs (Gemini 3.7 Flash, DeepSeek, Claude Opus) to build high-performance, polished, native desktop creation tools (Dear ImGui 1.92+, C++, Embedded Lua 5.4, Raylib 6.0, OpenGL 3.3) that feel incredible, never crash, and run flawlessly across Linux and Windows 7+.**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Nix Flake](https://img.shields.io/badge/Nix-Flake%20Reproducible-blue.svg)](flake.nix)
 [![Backend: OpenGL 3.3](https://img.shields.io/badge/Backend-OpenGL%203.3-green.svg)](docs/WINDOWS_OPENGL_RESIZE.md)
 [![Platform: Linux & Windows 7+](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%207%2B-orange.svg)](docs/WINDOWS_COMPAT_AND_WIN7.md)
+
+---
+
+## 💡 The Vision
+
+This framework is distilled from months of hands-on experience building, evaluating, and dogfooding native desktop creation tools with autonomous AI coding agents.
+
+The core ambition is simple: **provide a dramatically better default than the typical web-tech-based, fragile Electron dashboard.** Web-based tools struggle with native high-performance computation, hardware depth buffers, zero-latency frame timing, and deep OS interop. `llm-ux` provides an ultra-lightweight, 60 FPS locked, crash-immune foundation combining a slim C++ host, immediate-mode Dear ImGui, and an embedded Lua 5.4 application engine that LLMs can rapidly build, test, and evolve with zero friction.
+
+---
+
+## ⚠️ Early Development Notice
+
+> **Note**: `llm-ux` is currently in active early development. The contents of this repository and README represent the converged architecture, invariants, and lessons learned from months of building and benchmarking native applications with frontier models. Expect continuous refinement and expanding recipes.
 
 ---
 
@@ -17,7 +31,7 @@
 <div align="center">
   <p><em>Demo Application: <strong>CubeForge</strong> — 3D Block Modeler & 2D Texture Paint Studio</em></p>
   <p><em>(Replace this block with your video / GIF showcase embed)</em></p>
-  <!-- <video src="https://github.com/your-username/llm-ux/assets/demo.mp4" controls="controls" width="800"></video> -->
+  <!-- <video src="https://github.com/Francesco149/llm-ux/assets/demo.mp4" controls="controls" width="800"></video> -->
 </div>
 <!-- ================================================================= -->
 
