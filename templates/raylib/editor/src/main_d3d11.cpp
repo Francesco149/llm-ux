@@ -94,9 +94,9 @@ static Mat4 mat4_perspective(float fovy_deg, float aspect, float near_z, float f
     float tan_half = std::tan(rad * 0.5f);
     r.m[0] = 1.0f / (aspect * tan_half);
     r.m[5] = 1.0f / tan_half;
-    r.m[10] = far_z / (far_z - near_z);
-    r.m[11] = 1.0f;
-    r.m[14] = (-near_z * far_z) / (far_z - near_z);
+    r.m[10] = far_z / (near_z - far_z);
+    r.m[11] = -1.0f;
+    r.m[14] = (near_z * far_z) / (near_z - far_z);
     return r;
 }
 
@@ -113,7 +113,7 @@ static Mat4 mat4_ortho(float left, float right, float bottom, float top, float n
 }
 
 static Mat4 mat4_look_at(Vec3 eye, Vec3 target, Vec3 up) {
-    Vec3 zaxis = v3_norm(v3_sub(target, eye));
+    Vec3 zaxis = v3_norm(v3_sub(eye, target));
     Vec3 xaxis = v3_norm(v3_cross(up, zaxis));
     Vec3 yaxis = v3_cross(zaxis, xaxis);
 
@@ -463,6 +463,119 @@ static void draw_dynamic_lines(const D3DVertex* verts, size_t count) {
     g_d3d_context->Draw((UINT)count, 0);
 }
 
+static void draw_dynamic_triangles_unlit(const D3DVertex* verts, size_t count, Vec4 tint = { 1, 1, 1, 1 }) {
+    if (count == 0 || !g_d3d_context) return;
+    ensure_dynamic_vb(count);
+
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    if (SUCCEEDED(g_d3d_context->Map(g_dynamic_vb, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+        memcpy(mapped.pData, verts, count * sizeof(D3DVertex));
+        g_d3d_context->Unmap(g_dynamic_vb, 0);
+    }
+
+    Mat4 view = mat4_look_at(g_camera.position, g_camera.target, g_camera.up);
+    Mat4 proj = mat4_perspective(g_camera.fovy, g_win_w / (float)std::max(1, g_win_h), 0.1f, 1000.0f);
+    Mat4 mvp = mat4_mul(view, proj);
+
+    SceneCBuffer cb = {};
+    cb.mvp = mvp;
+    cb.model = mat4_identity();
+    cb.color_tint = tint;
+    g_d3d_context->UpdateSubresource(g_cbuffer_scene, 0, nullptr, &cb, 0, 0);
+
+    UINT stride = sizeof(D3DVertex);
+    UINT offset = 0;
+    g_d3d_context->IASetVertexBuffers(0, 1, &g_dynamic_vb, &stride, &offset);
+    g_d3d_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    g_d3d_context->IASetInputLayout(g_layout_unlit);
+    g_d3d_context->VSSetShader(g_vs_unlit, nullptr, 0);
+    g_d3d_context->VSSetConstantBuffers(0, 1, &g_cbuffer_scene);
+    g_d3d_context->PSSetShader(g_ps_unlit, nullptr, 0);
+
+    g_d3d_context->RSSetState(g_raster_solid);
+    g_d3d_context->OMSetDepthStencilState(g_depth_state_3d, 0);
+    g_d3d_context->OMSetBlendState(g_blend_state, nullptr, 0xffffffff);
+
+    g_d3d_context->Draw((UINT)count, 0);
+}
+
+static void draw_dynamic_triangles_2d(const D3DVertex* verts, size_t count, int tex_id = -1, Vec4 tint = { 1, 1, 1, 1 }) {
+    if (count == 0 || !g_d3d_context) return;
+    ensure_dynamic_vb(count);
+
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    if (SUCCEEDED(g_d3d_context->Map(g_dynamic_vb, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+        memcpy(mapped.pData, verts, count * sizeof(D3DVertex));
+        g_d3d_context->Unmap(g_dynamic_vb, 0);
+    }
+
+    SceneCBuffer cb = {};
+    cb.mvp = mat4_identity();
+    cb.model = mat4_identity();
+    cb.ambient = v4(1, 1, 1, 1);
+    cb.color_tint = tint;
+    cb.use_texture = (tex_id > 0 && tex_id <= (int)g_textures.size() && g_textures[tex_id - 1].srv != nullptr) ? 1 : 0;
+    g_d3d_context->UpdateSubresource(g_cbuffer_scene, 0, nullptr, &cb, 0, 0);
+
+    if (cb.use_texture) {
+        ID3D11ShaderResourceView* srv = g_textures[tex_id - 1].srv;
+        g_d3d_context->PSSetShaderResources(0, 1, &srv);
+        g_d3d_context->PSSetSamplers(0, 1, &g_sampler_state);
+        g_d3d_context->VSSetShader(g_vs_3d, nullptr, 0);
+        g_d3d_context->PSSetShader(g_ps_3d, nullptr, 0);
+        g_d3d_context->IASetInputLayout(g_layout_3d);
+    } else {
+        g_d3d_context->VSSetShader(g_vs_unlit, nullptr, 0);
+        g_d3d_context->PSSetShader(g_ps_unlit, nullptr, 0);
+        g_d3d_context->IASetInputLayout(g_layout_unlit);
+    }
+
+    UINT stride = sizeof(D3DVertex);
+    UINT offset = 0;
+    g_d3d_context->IASetVertexBuffers(0, 1, &g_dynamic_vb, &stride, &offset);
+    g_d3d_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    g_d3d_context->VSSetConstantBuffers(0, 1, &g_cbuffer_scene);
+    g_d3d_context->PSSetConstantBuffers(0, 1, &g_cbuffer_scene);
+
+    g_d3d_context->RSSetState(g_raster_solid);
+    g_d3d_context->OMSetDepthStencilState(g_depth_state_2d, 0);
+    g_d3d_context->OMSetBlendState(g_blend_state, nullptr, 0xffffffff);
+
+    g_d3d_context->Draw((UINT)count, 0);
+}
+
+static void draw_dynamic_lines_2d(const D3DVertex* verts, size_t count) {
+    if (count == 0 || !g_d3d_context) return;
+    ensure_dynamic_vb(count);
+
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    if (SUCCEEDED(g_d3d_context->Map(g_dynamic_vb, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+        memcpy(mapped.pData, verts, count * sizeof(D3DVertex));
+        g_d3d_context->Unmap(g_dynamic_vb, 0);
+    }
+
+    SceneCBuffer cb = {};
+    cb.mvp = mat4_identity();
+    cb.model = mat4_identity();
+    cb.color_tint = v4(1, 1, 1, 1);
+    g_d3d_context->UpdateSubresource(g_cbuffer_scene, 0, nullptr, &cb, 0, 0);
+
+    UINT stride = sizeof(D3DVertex);
+    UINT offset = 0;
+    g_d3d_context->IASetVertexBuffers(0, 1, &g_dynamic_vb, &stride, &offset);
+    g_d3d_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_LINELIST);
+    g_d3d_context->IASetInputLayout(g_layout_unlit);
+    g_d3d_context->VSSetShader(g_vs_unlit, nullptr, 0);
+    g_d3d_context->VSSetConstantBuffers(0, 1, &g_cbuffer_scene);
+    g_d3d_context->PSSetShader(g_ps_unlit, nullptr, 0);
+
+    g_d3d_context->RSSetState(g_raster_solid);
+    g_d3d_context->OMSetDepthStencilState(g_depth_state_2d, 0);
+    g_d3d_context->OMSetBlendState(g_blend_state, nullptr, 0xffffffff);
+
+    g_d3d_context->Draw((UINT)count, 0);
+}
+
 // ── Raylib Lua Bindings (lp.rl.*) ───────────────────────────────────────────
 static int l_rl_draw_cube(lua_State* L) {
     float x = (float)luaL_checknumber(L, 1);
@@ -659,21 +772,16 @@ static int l_rl_draw_sphere(lua_State* L) {
             Vec3 p3 = { x + rad * std::sin(phi2) * std::cos(theta2), y + rad * std::cos(phi2), z + rad * std::sin(phi2) * std::sin(theta2) };
             Vec3 p4 = { x + rad * std::sin(phi2) * std::cos(theta1), y + rad * std::cos(phi2), z + rad * std::sin(phi2) * std::sin(theta1) };
 
-            Vec3 n1 = v3_norm(v3_sub(p1, v3(x, y, z)));
-            Vec3 n2 = v3_norm(v3_sub(p2, v3(x, y, z)));
-            Vec3 n3 = v3_norm(v3_sub(p3, v3(x, y, z)));
-            Vec3 n4 = v3_norm(v3_sub(p4, v3(x, y, z)));
+            verts.push_back({ p1.x, p1.y, p1.z, r, g, b, a, 0, 1, 0, 0, 0 });
+            verts.push_back({ p2.x, p2.y, p2.z, r, g, b, a, 0, 1, 0, 0, 0 });
+            verts.push_back({ p3.x, p3.y, p3.z, r, g, b, a, 0, 1, 0, 0, 0 });
 
-            verts.push_back({ p1.x, p1.y, p1.z, r, g, b, a, n1.x, n1.y, n1.z, 0, 0 });
-            verts.push_back({ p2.x, p2.y, p2.z, r, g, b, a, n2.x, n2.y, n2.z, 0, 0 });
-            verts.push_back({ p3.x, p3.y, p3.z, r, g, b, a, n3.x, n3.y, n3.z, 0, 0 });
-
-            verts.push_back({ p1.x, p1.y, p1.z, r, g, b, a, n1.x, n1.y, n1.z, 0, 0 });
-            verts.push_back({ p3.x, p3.y, p3.z, r, g, b, a, n3.x, n3.y, n3.z, 0, 0 });
-            verts.push_back({ p4.x, p4.y, p4.z, r, g, b, a, n4.x, n4.y, n4.z, 0, 0 });
+            verts.push_back({ p1.x, p1.y, p1.z, r, g, b, a, 0, 1, 0, 0, 0 });
+            verts.push_back({ p3.x, p3.y, p3.z, r, g, b, a, 0, 1, 0, 0, 0 });
+            verts.push_back({ p4.x, p4.y, p4.z, r, g, b, a, 0, 1, 0, 0, 0 });
         }
     }
-    draw_dynamic_triangles(verts.data(), verts.size());
+    draw_dynamic_triangles_unlit(verts.data(), verts.size(), v4(r, g, b, a));
     return 0;
 }
 
@@ -787,10 +895,10 @@ static int l_rl_load_model_mesh(lua_State* L) {
         lua_rawgeti(L, 1, base + 1);  verts[i].x  = (float)lua_tonumber(L, -1); lua_pop(L, 1);
         lua_rawgeti(L, 1, base + 2);  verts[i].y  = (float)lua_tonumber(L, -1); lua_pop(L, 1);
         lua_rawgeti(L, 1, base + 3);  verts[i].z  = (float)lua_tonumber(L, -1); lua_pop(L, 1);
-        lua_rawgeti(L, 1, base + 4);  verts[i].r  = (float)lua_tonumber(L, -1); lua_pop(L, 1);
-        lua_rawgeti(L, 1, base + 5);  verts[i].g  = (float)lua_tonumber(L, -1); lua_pop(L, 1);
-        lua_rawgeti(L, 1, base + 6);  verts[i].b  = (float)lua_tonumber(L, -1); lua_pop(L, 1);
-        lua_rawgeti(L, 1, base + 7);  verts[i].a  = (float)lua_tonumber(L, -1); lua_pop(L, 1);
+        lua_rawgeti(L, 1, base + 4);  verts[i].r  = (float)lua_tonumber(L, -1) / 255.0f; lua_pop(L, 1);
+        lua_rawgeti(L, 1, base + 5);  verts[i].g  = (float)lua_tonumber(L, -1) / 255.0f; lua_pop(L, 1);
+        lua_rawgeti(L, 1, base + 6);  verts[i].b  = (float)lua_tonumber(L, -1) / 255.0f; lua_pop(L, 1);
+        lua_rawgeti(L, 1, base + 7);  verts[i].a  = (float)lua_tonumber(L, -1) / 255.0f; lua_pop(L, 1);
         lua_rawgeti(L, 1, base + 8);  verts[i].nx = (float)lua_tonumber(L, -1); lua_pop(L, 1);
         lua_rawgeti(L, 1, base + 9);  verts[i].ny = (float)lua_tonumber(L, -1); lua_pop(L, 1);
         lua_rawgeti(L, 1, base + 10); verts[i].nz = (float)lua_tonumber(L, -1); lua_pop(L, 1);
@@ -1079,9 +1187,7 @@ static int l_rl_draw_texture(lua_State* L) {
     float h = (float)luaL_checknumber(L, 5);
 
     if (tex_id <= 0 || tex_id > (int)g_textures.size()) return 0;
-    ID3D11ShaderResourceView* srv = g_textures[tex_id - 1].srv;
-    if (!srv || !g_d3d_context) return 0;
-    // Transform world to screen coordinates using cam2d
+
     float sx0 = (x - g_cam2d.target.x) * g_cam2d.zoom + g_win_w * 0.5f;
     float sy0 = (y - g_cam2d.target.y) * g_cam2d.zoom + g_win_h * 0.5f;
     float sx1 = sx0 + w * g_cam2d.zoom;
@@ -1100,43 +1206,110 @@ static int l_rl_draw_texture(lua_State* L) {
         { ndc_x1, ndc_y1, 0.0f, 1,1,1,1, 0,0,-1, 1, 1 },
         { ndc_x0, ndc_y1, 0.0f, 1,1,1,1, 0,0,-1, 0, 1 },
     };
-
-    ensure_dynamic_vb(6);
-    D3D11_MAPPED_SUBRESOURCE mapped;
-    if (SUCCEEDED(g_d3d_context->Map(g_dynamic_vb, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
-        memcpy(mapped.pData, quad, sizeof(quad));
-        g_d3d_context->Unmap(g_dynamic_vb, 0);
-    }
-
-    SceneCBuffer cb = {};
-    cb.mvp = mat4_identity();
-    cb.model = mat4_identity();
-    cb.ambient = v4(1, 1, 1, 1);
-    cb.color_tint = v4(1, 1, 1, 1);
-    cb.use_texture = 1;
-    g_d3d_context->UpdateSubresource(g_cbuffer_scene, 0, nullptr, &cb, 0, 0);
-    g_d3d_context->PSSetShaderResources(0, 1, &srv);
-
-    UINT stride = sizeof(D3DVertex);
-    UINT offset = 0;
-    g_d3d_context->IASetVertexBuffers(0, 1, &g_dynamic_vb, &stride, &offset);
-    g_d3d_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    g_d3d_context->IASetInputLayout(g_layout_3d);
-    g_d3d_context->VSSetShader(g_vs_3d, nullptr, 0);
-    g_d3d_context->VSSetConstantBuffers(0, 1, &g_cbuffer_scene);
-    g_d3d_context->PSSetShader(g_ps_3d, nullptr, 0);
-    g_d3d_context->PSSetConstantBuffers(0, 1, &g_cbuffer_scene);
-    g_d3d_context->PSSetSamplers(0, 1, &g_sampler_state);
-
-    g_d3d_context->RSSetState(g_raster_solid);
-    g_d3d_context->OMSetDepthStencilState(g_depth_state_2d, 0);
-    g_d3d_context->OMSetBlendState(g_blend_state, nullptr, 0xffffffff);
-
-    g_d3d_context->Draw(6, 0);
+    draw_dynamic_triangles_2d(quad, 6, tex_id);
     return 0;
 }
 
-// ── Screen & Input Getters ──────────────────────────────────────────────────
+static int l_rl_draw_rect_2d(lua_State* L) {
+    float x = (float)luaL_checknumber(L, 1);
+    float y = (float)luaL_checknumber(L, 2);
+    float w = (float)luaL_checknumber(L, 3);
+    float h = (float)luaL_checknumber(L, 4);
+    float r = (float)luaL_optinteger(L, 5, 255) / 255.0f;
+    float g = (float)luaL_optinteger(L, 6, 255) / 255.0f;
+    float b = (float)luaL_optinteger(L, 7, 255) / 255.0f;
+    float a = (float)luaL_optinteger(L, 8, 255) / 255.0f;
+
+    float sx0 = (x - g_cam2d.target.x) * g_cam2d.zoom + g_win_w * 0.5f;
+    float sy0 = (y - g_cam2d.target.y) * g_cam2d.zoom + g_win_h * 0.5f;
+    float sx1 = sx0 + w * g_cam2d.zoom;
+    float sy1 = sy0 + h * g_cam2d.zoom;
+
+    float ndc_x0 = (2.0f * sx0) / g_win_w - 1.0f;
+    float ndc_x1 = (2.0f * sx1) / g_win_w - 1.0f;
+    float ndc_y0 = 1.0f - (2.0f * sy0) / g_win_h;
+    float ndc_y1 = 1.0f - (2.0f * sy1) / g_win_h;
+
+    D3DVertex quad[6] = {
+        { ndc_x0, ndc_y0, 0.0f, r, g, b, a, 0,0,-1, 0, 0 },
+        { ndc_x1, ndc_y0, 0.0f, r, g, b, a, 0,0,-1, 1, 0 },
+        { ndc_x1, ndc_y1, 0.0f, r, g, b, a, 0,0,-1, 1, 1 },
+        { ndc_x0, ndc_y0, 0.0f, r, g, b, a, 0,0,-1, 0, 0 },
+        { ndc_x1, ndc_y1, 0.0f, r, g, b, a, 0,0,-1, 1, 1 },
+        { ndc_x0, ndc_y1, 0.0f, r, g, b, a, 0,0,-1, 0, 1 },
+    };
+    draw_dynamic_triangles_2d(quad, 6, -1);
+    return 0;
+}
+
+static int l_rl_draw_circle_lines_2d(lua_State* L) {
+    float cx = (float)luaL_checknumber(L, 1);
+    float cy = (float)luaL_checknumber(L, 2);
+    float rad = (float)luaL_checknumber(L, 3);
+    float r = (float)luaL_optinteger(L, 5, 255) / 255.0f;
+    float g = (float)luaL_optinteger(L, 6, 255) / 255.0f;
+    float b = (float)luaL_optinteger(L, 7, 255) / 255.0f;
+    float a = (float)luaL_optinteger(L, 8, 255) / 255.0f;
+
+    std::vector<D3DVertex> lines;
+    const int segs = 32;
+    for (int i = 0; i < segs; i++) {
+        float a1 = (i / (float)segs) * 6.2831853f;
+        float a2 = ((i + 1) / (float)segs) * 6.2831853f;
+        float wx1 = cx + rad * std::cos(a1);
+        float wy1 = cy + rad * std::sin(a1);
+        float wx2 = cx + rad * std::cos(a2);
+        float wy2 = cy + rad * std::sin(a2);
+
+        float sx1 = (wx1 - g_cam2d.target.x) * g_cam2d.zoom + g_win_w * 0.5f;
+        float sy1 = (wy1 - g_cam2d.target.y) * g_cam2d.zoom + g_win_h * 0.5f;
+        float sx2 = (wx2 - g_cam2d.target.x) * g_cam2d.zoom + g_win_w * 0.5f;
+        float sy2 = (wy2 - g_cam2d.target.y) * g_cam2d.zoom + g_win_h * 0.5f;
+
+        float ndc_x1 = (2.0f * sx1) / g_win_w - 1.0f;
+        float ndc_y1 = 1.0f - (2.0f * sy1) / g_win_h;
+        float ndc_x2 = (2.0f * sx2) / g_win_w - 1.0f;
+        float ndc_y2 = 1.0f - (2.0f * sy2) / g_win_h;
+
+        lines.push_back({ ndc_x1, ndc_y1, 0.0f, r, g, b, a, 0, 0, 0, 0, 0 });
+        lines.push_back({ ndc_x2, ndc_y2, 0.0f, r, g, b, a, 0, 0, 0, 0, 0 });
+    }
+    draw_dynamic_lines_2d(lines.data(), lines.size());
+    return 0;
+}
+
+static int l_rl_draw_text_2d(lua_State* L) {
+    return 0;
+}
+
+static int l_rl_draw_line_2d(lua_State* L) {
+    float x1 = (float)luaL_checknumber(L, 1);
+    float y1 = (float)luaL_checknumber(L, 2);
+    float x2 = (float)luaL_checknumber(L, 3);
+    float y2 = (float)luaL_checknumber(L, 4);
+    float r = (float)luaL_optinteger(L, 6, 255) / 255.0f;
+    float g = (float)luaL_optinteger(L, 7, 255) / 255.0f;
+    float b = (float)luaL_optinteger(L, 8, 255) / 255.0f;
+    float a = (float)luaL_optinteger(L, 9, 255) / 255.0f;
+
+    float sx1 = (x1 - g_cam2d.target.x) * g_cam2d.zoom + g_win_w * 0.5f;
+    float sy1 = (y1 - g_cam2d.target.y) * g_cam2d.zoom + g_win_h * 0.5f;
+    float sx2 = (x2 - g_cam2d.target.x) * g_cam2d.zoom + g_win_w * 0.5f;
+    float sy2 = (y2 - g_cam2d.target.y) * g_cam2d.zoom + g_win_h * 0.5f;
+
+    float ndc_x1 = (2.0f * sx1) / g_win_w - 1.0f;
+    float ndc_y1 = 1.0f - (2.0f * sy1) / g_win_h;
+    float ndc_x2 = (2.0f * sx2) / g_win_w - 1.0f;
+    float ndc_y2 = 1.0f - (2.0f * sy2) / g_win_h;
+
+    D3DVertex line[2] = {
+        { ndc_x1, ndc_y1, 0.0f, r, g, b, a, 0, 0, 0, 0, 0 },
+        { ndc_x2, ndc_y2, 0.0f, r, g, b, a, 0, 0, 0, 0, 0 },
+    };
+    draw_dynamic_lines_2d(line, 2);
+    return 0;
+}
+
 static int l_rl_get_screen_size(lua_State* L) {
     lua_pushinteger(L, g_win_w);
     lua_pushinteger(L, g_win_h);
@@ -1156,6 +1329,25 @@ static int l_rl_set_window_size(lua_State* L) {
     }
     return 0;
 }
+static HCURSOR g_current_cursor = nullptr;
+
+static int l_rl_set_mouse_cursor(lua_State* L) {
+    int type = (int)luaL_optinteger(L, 1, 0);
+    LPCTSTR cur = IDC_ARROW;
+    switch (type) {
+        case 1: cur = IDC_SIZEWE; break;
+        case 2: cur = IDC_SIZENS; break;
+        case 3: cur = IDC_SIZENWSE; break;
+        case 4: cur = IDC_SIZENESW; break;
+        case 5: cur = IDC_HAND; break;
+        case 6: cur = IDC_CROSS; break;
+        default: cur = IDC_ARROW; break;
+    }
+    g_current_cursor = LoadCursor(nullptr, cur);
+    SetCursor(g_current_cursor);
+    return 0;
+}
+
 
 static int l_rl_get_monitor_size(lua_State* L) {
     int w = 1920, h = 1080;
@@ -1179,21 +1371,7 @@ static int l_rl_get_window_position(lua_State* L) {
     lua_pushinteger(L, rc.top);
     return 2;
 }
-static int l_rl_set_mouse_cursor(lua_State* L) {
-    int type = (int)luaL_optinteger(L, 1, 0);
-    LPCTSTR cur = IDC_ARROW;
-    switch (type) {
-        case 1: cur = IDC_SIZEWE; break;
-        case 2: cur = IDC_SIZENS; break;
-        case 3: cur = IDC_SIZENWSE; break;
-        case 4: cur = IDC_SIZENESW; break;
-        case 5: cur = IDC_HAND; break;
-        case 6: cur = IDC_CROSS; break;
-        default: cur = IDC_ARROW; break;
-    }
-    SetCursor(LoadCursor(nullptr, cur));
-    return 0;
-}
+
 
 static int l_rl_is_mouse_button_down(lua_State* L) {
     int btn = (int)luaL_checkinteger(L, 1);
@@ -1327,9 +1505,53 @@ static int l_rl_take_screenshot(lua_State* L) {
     return 0;
 }
 
-
 static int l_rl_load_model_cylinder(lua_State* L) {
-    D3DModel m = {};
+    float rt = (float)luaL_checknumber(L, 1);
+    float rb = (float)luaL_checknumber(L, 2);
+    float h  = (float)luaL_checknumber(L, 3);
+    int slices = (int)luaL_optinteger(L, 4, 16);
+    if (slices < 3) slices = 3;
+
+    std::vector<D3DVertex> verts;
+    std::vector<uint32_t> indices;
+    float hh = h * 0.5f;
+    uint32_t top_center_idx = 0;
+    verts.push_back({ 0, hh, 0, 1,1,1,1, 0,1,0, 0.5f, 0.5f });
+    uint32_t bot_center_idx = 1;
+    verts.push_back({ 0, -hh, 0, 1,1,1,1, 0,-1,0, 0.5f, 0.5f });
+
+    uint32_t ring_start = 2;
+    for (int i = 0; i <= slices; i++) {
+        float angle = (i / (float)slices) * 6.2831853f;
+        float ca = std::cos(angle);
+        float sa = std::sin(angle);
+        float u = (float)i / slices;
+        verts.push_back({ rt * ca, hh, rt * sa, 1,1,1,1, 0,1,0, u, 0 });
+        verts.push_back({ rb * ca, -hh, rb * sa, 1,1,1,1, 0,-1,0, u, 1 });
+    }
+
+    for (int i = 0; i < slices; i++) {
+        uint32_t t0 = ring_start + i * 2;
+        uint32_t b0 = ring_start + i * 2 + 1;
+        uint32_t t1 = ring_start + (i + 1) * 2;
+        uint32_t b1 = ring_start + (i + 1) * 2 + 1;
+        indices.push_back(top_center_idx); indices.push_back(t1); indices.push_back(t0);
+        indices.push_back(bot_center_idx); indices.push_back(b0); indices.push_back(b1);
+        indices.push_back(t0); indices.push_back(t1); indices.push_back(b1);
+        indices.push_back(t0); indices.push_back(b1); indices.push_back(b0);
+    }
+
+    ID3D11Buffer* vb = nullptr;
+    ID3D11Buffer* ib = nullptr;
+    D3D11_BUFFER_DESC vbd = { (UINT)(verts.size() * sizeof(D3DVertex)), D3D11_USAGE_IMMUTABLE, D3D11_BIND_VERTEX_BUFFER, 0, 0, 0 };
+    D3D11_SUBRESOURCE_DATA vdata = { verts.data(), 0, 0 };
+    g_d3d_device->CreateBuffer(&vbd, &vdata, &vb);
+
+    D3D11_BUFFER_DESC ibd = { (UINT)(indices.size() * sizeof(uint32_t)), D3D11_USAGE_IMMUTABLE, D3D11_BIND_INDEX_BUFFER, 0, 0, 0 };
+    D3D11_SUBRESOURCE_DATA idata = { indices.data(), 0, 0 };
+    g_d3d_device->CreateBuffer(&ibd, &idata, &ib);
+
+    D3DModel m = { vb, ib, (int)verts.size(), (int)indices.size(), -1, { 1, 1, 1, 1 } };
     g_models.push_back(m);
     lua_pushinteger(L, (int)g_models.size());
     return 1;
@@ -1351,10 +1573,8 @@ static int l_rl_debug_material(lua_State* L) {
     return 2;
 }
 
-static int l_rl_draw_line_2d(lua_State* L) { return 0; }
-static int l_rl_draw_circle_lines_2d(lua_State* L) { return 0; }
-static int l_rl_draw_rect_2d(lua_State* L) { return 0; }
-static int l_rl_draw_text_2d(lua_State* L) { return 0; }
+
+
 // ── Register Raylib Lua Module ──────────────────────────────────────────────
 static void rl_register(lua_State* L) {
     lua_getglobal(L, "lp");
@@ -2348,6 +2568,13 @@ static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
             g_mouse_y = y;
             return 0;
         }
+
+        case WM_SETCURSOR:
+            if (LOWORD(lParam) == HTCLIENT) {
+                SetCursor(g_current_cursor ? g_current_cursor : LoadCursor(nullptr, IDC_ARROW));
+                return TRUE;
+            }
+            break;
 
         case WM_LBUTTONDOWN: g_mouse_down[0] = true; g_mouse_pressed[0] = true; return 0;
         case WM_LBUTTONUP:   g_mouse_down[0] = false; return 0;
