@@ -379,6 +379,45 @@ void main() {
 }
 )GLSL";
 
+static const char* LIGHTING_VS = R"GLSL(
+#version 330
+in vec3 vertexPosition;
+in vec2 vertexTexCoord;
+in vec4 vertexColor;
+in vec3 vertexNormal;
+uniform mat4 mvp;
+uniform mat4 matModel;
+out vec2 fragTexCoord;
+out vec4 fragColor;
+out vec3 fragNormal;
+void main() {
+    fragTexCoord = vertexTexCoord;
+    fragColor = vertexColor;
+    fragNormal = normalize((matModel * vec4(vertexNormal, 0.0)).xyz);
+    gl_Position = mvp * vec4(vertexPosition, 1.0);
+}
+)GLSL";
+
+static const char* LIGHTING_FS = R"GLSL(
+#version 330
+in vec2 fragTexCoord;
+in vec4 fragColor;
+in vec3 fragNormal;
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+out vec4 finalColor;
+void main() {
+    vec4 texelColor = texture(texture0, fragTexCoord);
+    vec3 n = length(fragNormal) > 0.01 ? normalize(fragNormal) : vec3(0.0, 1.0, 0.0);
+    vec3 l1 = normalize(vec3(0.5, 0.8, 0.6));
+    vec3 l2 = normalize(vec3(-0.5, 0.3, -0.6));
+    float diff1 = max(0.0, dot(n, l1));
+    float diff2 = max(0.0, dot(n, l2)) * 0.35;
+    vec3 lighting = vec3(0.45, 0.45, 0.48) + vec3(0.75, 0.73, 0.68) * diff1 + vec3(0.35, 0.38, 0.42) * diff2;
+    finalColor = vec4((fragColor * colDiffuse * texelColor).rgb * min(lighting, vec3(1.4)), 1.0);
+}
+)GLSL";
+
 static int l_rl_load_model_cube(lua_State* L) {
     float w = (float)luaL_checknumber(L, 1);
     float h = (float)luaL_checknumber(L, 2);
@@ -488,6 +527,21 @@ static int l_rl_draw_model(lua_State* L) {
     int a = (int)luaL_optinteger(L, 9, 255);
     if (mid < 0 || mid >= (int)g_models.size())
         return luaL_error(L, "draw_model: bad model id %d", mid);
+
+    static Shader s_lighting_shader = {};
+    static Shader s_default_shader = {};
+    static bool s_shader_inited = false;
+    if (!s_shader_inited) {
+        s_default_shader = g_models[mid].materials[0].shader;
+        s_lighting_shader = LoadShaderFromMemory(LIGHTING_VS, LIGHTING_FS);
+        s_shader_inited = true;
+    }
+
+    if (g_lighting_enabled && s_lighting_shader.id > 0) {
+        g_models[mid].materials[0].shader = s_lighting_shader;
+    } else {
+        g_models[mid].materials[0].shader = s_default_shader;
+    }
     DrawModel(g_models[mid], pos, scale, { (unsigned char)r, (unsigned char)g, (unsigned char)b, (unsigned char)a });
     return 0;
 }

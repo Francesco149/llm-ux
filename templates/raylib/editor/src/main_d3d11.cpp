@@ -1027,9 +1027,9 @@ static int l_rl_draw_model(lua_State* L) {
     SceneCBuffer cb = {};
     cb.mvp = mvp;
     if (g_lighting_enabled) {
-        cb.ambient = v4(0.35f, 0.35f, 0.38f, 1.0f);
-        cb.sun_dir = v4(-0.4f, -1.0f, -0.6f, 0.0f);
-        cb.sun_color = v4(0.9f, 0.88f, 0.82f, 1.0f);
+        cb.ambient = v4(0.45f, 0.45f, 0.48f, 1.0f);
+        cb.sun_dir = v4(0.5f, 0.8f, 0.6f, 0.0f);
+        cb.sun_color = v4(0.75f, 0.73f, 0.68f, 1.0f);
     } else {
         cb.ambient = v4(1.0f, 1.0f, 1.0f, 1.0f);
         cb.sun_dir = v4(0.0f, 0.0f, 0.0f, 0.0f);
@@ -2344,7 +2344,8 @@ PSInput VSMain(VSInput input) {
     PSInput output;
     output.pos  = mul(u_mvp, float4(input.pos, 1.0f));
     output.wpos = mul(u_model, float4(input.pos, 1.0f)).xyz;
-    output.norm = normalize(mul((float3x3)u_model, input.norm));
+    float lnorm = length(input.norm);
+    output.norm = lnorm > 0.01f ? normalize(mul((float3x3)u_model, input.norm)) : float3(0, 1, 0);
     output.col  = input.col * u_color_tint;
     output.uv   = input.uv;
     return output;
@@ -2355,12 +2356,15 @@ SamplerState g_sampler : register(s0);
 
 float4 PSMain(PSInput input) : SV_TARGET {
     float4 tex_col = u_use_texture ? g_tex.Sample(g_sampler, input.uv) : float4(1,1,1,1);
-    float3 n = normalize(input.norm);
-    float3 l = normalize(-u_sun_dir.xyz);
-    float diff = max(0.0f, dot(n, l));
-    float3 lighting = u_ambient.xyz + u_sun_color.xyz * diff;
+    float lnorm = length(input.norm);
+    float3 n = lnorm > 0.01f ? normalize(input.norm) : float3(0, 1, 0);
+    float3 l1 = normalize(float3(0.5f, 0.8f, 0.6f));
+    float3 l2 = normalize(float3(-0.5f, 0.3f, -0.6f));
+    float diff1 = max(0.0f, dot(n, l1));
+    float diff2 = max(0.0f, dot(n, l2)) * 0.35f;
+    float3 lighting = u_ambient.xyz + u_sun_color.xyz * diff1 + float3(0.35f, 0.38f, 0.42f) * diff2 * (u_sun_color.x > 0.01f ? 1.0f : 0.0f);
     float4 final_col = input.col * tex_col;
-    return float4(final_col.rgb * lighting, 1.0f);
+    return float4(final_col.rgb * min(lighting, float3(1.4f, 1.4f, 1.4f)), 1.0f);
 }
 )HLSL";
 
