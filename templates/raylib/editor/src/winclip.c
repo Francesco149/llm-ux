@@ -20,23 +20,34 @@ static int glfw_resolved = 0;
 static void resolve_glfw(void) {
     if (glfw_resolved) return;
     glfw_resolved = 1;
-    // raylib links glfw3.dll dynamically — look it up by module handle.
-    HMODULE glfw = GetModuleHandleA("glfw3.dll");
-    if (!glfw) glfw = GetModuleHandleA("glfw3");
-    if (!glfw) glfw = GetModuleHandleA("libglfw3.dll");
-    if (!glfw) return;
-    pfn_glfwGetWin32Window = (GlfwGetWin32WindowFn)
-        GetProcAddress(glfw, "glfwGetWin32Window");
+    HMODULE mods[] = {
+        GetModuleHandleA("glfw3.dll"),
+        GetModuleHandleA("libraylib.dll"),
+        GetModuleHandleA("raylib.dll"),
+        GetModuleHandleA("libglfw3.dll"),
+        GetModuleHandleA(NULL),
+    };
+    for (int i = 0; i < 5; i++) {
+        if (mods[i]) {
+            pfn_glfwGetWin32Window = (GlfwGetWin32WindowFn)GetProcAddress(mods[i], "glfwGetWin32Window");
+            if (pfn_glfwGetWin32Window) break;
+        }
+    }
 }
 // Resolve HWND from GLFW window handle.
 static HWND get_app_hwnd(void) {
     void *gw = GetWindowHandle();
     if (gw) {
         resolve_glfw();
-        if (pfn_glfwGetWin32Window)
-            return pfn_glfwGetWin32Window(gw);
+        if (pfn_glfwGetWin32Window) {
+            HWND hw = pfn_glfwGetWin32Window(gw);
+            if (hw && IsWindow(hw)) return hw;
+        }
+        if (IsWindow((HWND)gw)) return (HWND)gw;
     }
-    return GetActiveWindow();
+    HWND act = GetActiveWindow();
+    if (act && IsWindow(act)) return act;
+    return NULL;
 }
 
 // ── Clipboard ───────────────────────────────────────────────────────────────
@@ -179,12 +190,6 @@ static LRESULT CALLBACK subclass_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
 
         case WM_SIZE:
             if (wParam != SIZE_MINIMIZED && g_in_sizemove) {
-                app_on_live_resize();
-            }
-            break;
-
-        case WM_PAINT:
-            if (g_in_sizemove) {
                 app_on_live_resize();
             }
             break;

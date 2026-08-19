@@ -409,12 +409,10 @@ out vec4 finalColor;
 void main() {
     vec4 texelColor = texture(texture0, fragTexCoord);
     vec3 n = length(fragNormal) > 0.01 ? normalize(fragNormal) : vec3(0.0, 1.0, 0.0);
-    vec3 l1 = normalize(vec3(0.5, 0.8, 0.6));
-    vec3 l2 = normalize(vec3(-0.5, 0.3, -0.6));
-    float diff1 = max(0.0, dot(n, l1));
-    float diff2 = max(0.0, dot(n, l2)) * 0.35;
-    vec3 lighting = vec3(0.45, 0.45, 0.48) + vec3(0.75, 0.73, 0.68) * diff1 + vec3(0.35, 0.38, 0.42) * diff2;
-    finalColor = vec4((fragColor * colDiffuse * texelColor).rgb * min(lighting, vec3(1.4)), 1.0);
+    vec3 l = normalize(vec3(0.5, 0.8, 0.6));
+    float diff = max(0.0, dot(n, l));
+    vec3 lighting = vec3(0.40) + vec3(0.60) * diff;
+    finalColor = vec4((fragColor * colDiffuse * texelColor).rgb * min(lighting, vec3(1.0)), 1.0);
 }
 )GLSL";
 
@@ -516,7 +514,6 @@ static int l_rl_set_shader_value_float(lua_State* L) {
     SetShaderValue(g_shaders[sid], loc, &v, SHADER_UNIFORM_FLOAT);
     return 0;
 }
-
 static int l_rl_draw_model(lua_State* L) {
     int mid = (int)luaL_checkinteger(L, 1);
     Vector3 pos = { (float)luaL_checknumber(L, 2), (float)luaL_checknumber(L, 3), (float)luaL_checknumber(L, 4) };
@@ -1514,9 +1511,8 @@ static const char* font_path_env(const char* env, const char* fallback) {
 static bool g_in_render = false;
 
 extern "C" void app_on_live_resize(void) {
-    if (g_in_render) return;
+    if (!L_global || g_in_render) return;
     g_in_render = true;
-
     BeginDrawing();
     ClearBackground({ 24, 24, 28, 255 });
 
@@ -1742,13 +1738,13 @@ int main(int argc, char** argv) {
 
     setup_imgui_fonts_and_theme();  // modern dark theme + CJK/Cyrillic fonts
 
+    lua_init(root);
+
 #ifdef _WIN32
     if (!headless) {
         win_install_resize_hook();
     }
 #endif
-    lua_init(root);
-    // Load the headless drive tape (schedules per-frame input injections)
     bool drive_loaded = false;
     if (drive_script) {
         char dpath[2048];
