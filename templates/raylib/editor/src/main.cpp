@@ -12,6 +12,7 @@ extern "C" const char* win_clipboard_file_path(void);
 extern "C" const char* win_clipboard_text(void);
 extern "C" const char* win_open_file_dialog(void);
 extern "C" void win_get_workarea(int* out_w, int* out_h);
+extern "C" void win_install_resize_hook(void);
 #endif
 
 #include "raylib.h"
@@ -1443,6 +1444,30 @@ static const char* font_path_env(const char* env, const char* fallback) {
     return fallback;
 }
 
+// ── Win32 live continuous resize callback ───────────────────────────────────
+static bool g_in_render = false;
+
+extern "C" void app_on_live_resize(void) {
+    if (g_in_render) return;
+    g_in_render = true;
+
+    BeginDrawing();
+    ClearBackground({ 24, 24, 28, 255 });
+
+    BeginMode3D(g_camera);
+    lp_call_global("lp_draw3d");
+    EndMode3D();
+
+    lp_call_global("lp_draw2d");
+
+    rlImGuiBegin();
+    lua_frame();
+    rlImGuiEnd();
+    EndDrawing();
+
+    g_in_render = false;
+}
+
 static void resolve_font_path(char* out, size_t n, const char* env, const char* packaged_rel) {
     const char* p = font_path_env(env, nullptr);
     if (p) { snprintf(out, n, "%s", p); return; }
@@ -1651,6 +1676,11 @@ int main(int argc, char** argv) {
 
     setup_imgui_fonts_and_theme();  // modern dark theme + CJK/Cyrillic fonts
 
+#ifdef _WIN32
+    if (!headless) {
+        win_install_resize_hook();
+    }
+#endif
     lua_init(root);
     // Load the headless drive tape (schedules per-frame input injections)
     bool drive_loaded = false;

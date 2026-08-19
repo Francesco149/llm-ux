@@ -151,4 +151,55 @@ void win_get_workarea(int* out_w, int* out_h) {
     }
 }
 
+// ── Win32 live continuous resize hook ───────────────────────────────────────
+// Subclasses the window procedure so frames render live during the DefWindowProc
+// modal sizing loop when the user drags the window edge (eliminates stretching/freeze).
+extern void app_on_live_resize(void);
+
+static WNDPROC g_orig_wndproc = NULL;
+static HWND    g_hooked_hwnd = NULL;
+static int     g_in_sizemove = 0;
+
+static LRESULT CALLBACK subclass_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+        case WM_ENTERSIZEMOVE:
+            g_in_sizemove = 1;
+            break;
+
+        case WM_EXITSIZEMOVE:
+            g_in_sizemove = 0;
+            app_on_live_resize();
+            break;
+
+        case WM_SIZING:
+            app_on_live_resize();
+            break;
+
+        case WM_SIZE:
+            if (wParam != SIZE_MINIMIZED && g_in_sizemove) {
+                app_on_live_resize();
+            }
+            break;
+
+        case WM_PAINT:
+            if (g_in_sizemove) {
+                app_on_live_resize();
+            }
+            break;
+    }
+
+    if (g_orig_wndproc) {
+        return CallWindowProc(g_orig_wndproc, hwnd, msg, wParam, lParam);
+    }
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+void win_install_resize_hook(void) {
+    HWND hwnd = get_app_hwnd();
+    if (hwnd && hwnd != g_hooked_hwnd) {
+        g_hooked_hwnd = hwnd;
+        g_orig_wndproc = (WNDPROC)SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)subclass_wndproc);
+    }
+}
+
 #endif // _WIN32

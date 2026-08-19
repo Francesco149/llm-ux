@@ -107,7 +107,12 @@ evaluation. `--mode json` exposes model identity + usage for verification.
    - **Stack A (OpenGL 3.3)**: all gates passed but **+368 C++ lines** for 5 GPU features; deleted.
    - **Stack B (Raylib)**: all gates passed with **+89 C++ lines** of thin wrappers; became the template.
    - **VERDICT: Raylib wins (4.9 vs 4.4 weighted)** — 4× less C++ work for identical 3D features, 30% faster completion. Gemini stays in Lua.
-2. **Windows target verified (2026-08-19)**: `make win` + `make package` via `pkgsCross.mingwW64.raylib`; ships exe + libraylib.dll + glfw3.dll (raylib links GLFW dynamically) + libmcfgthread + lua/ + tests/ + fonts. 46/46 tests pass on the Windows host, headless shot works, live window render vision-verified. Recipe in scaffold skill §5b.
+2. **Windows target verified (2026-08-19)**: `make win` + `make package` via `pkgsCross.mingwW64.raylib`; ships exe + libraylib.dll + glfw3.dll (raylib links GLFW dynamically) + libmcfgthread + lua/ + tests/ + fonts. 50/50 tests pass on the Windows host, headless shot works, live window render vision-verified. Windows 7+ compatible.
+3. **Low-res display & continuous resize verified (2026-08-19)**:
+   - Low-res screens (800x600, 640x480) safely clamped to work area bounds; window title bar never placed offscreen; responsive toolbar/sidebar layout.
+   - Win32 live continuous resize hook (`src/winclip.c` subclass) active during modal `DefWindowProc` sizing drag; 3D viewport & ImGui redraw live.
+   - Direct3D 11 backend evaluated on Windows host (3.91 ms/cycle, 100% live frames presented with DXGI flip model vs 6.54 ms for WGL).
+   - Linux nested compositor verified under Weston with both GL and Vulkan renderers.
 
 ### Pending Work & Next Session Roadmap
 1. **Harder-spec re-eval** (textured materials, custom shaders, GPU picking) to confirm the raylib advantage widens with complexity.
