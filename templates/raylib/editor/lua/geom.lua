@@ -48,6 +48,54 @@ function geom.dist3(x1, y1, z1, x2, y2, z2)
     return math.sqrt(dx * dx + dy * dy + dz * dz)
 end
 
+-- ── Distance from 3D point to line segment ─────────────────────────────────
+function geom.dist_point_to_segment(p, a, b)
+    local ab_x = b.x - a.x
+    local ab_y = b.y - a.y
+    local ab_z = b.z - a.z
+    local ap_x = p[1] - a.x
+    local ap_y = p[2] - a.y
+    local ap_z = p[3] - a.z
+    local ab_len2 = ab_x * ab_x + ab_y * ab_y + ab_z * ab_z
+    if ab_len2 < 1e-8 then
+        return geom.dist3(p[1], p[2], p[3], a.x, a.y, a.z)
+    end
+    local t = math.max(0.0, math.min(1.0, (ap_x * ab_x + ap_y * ab_y + ap_z * ab_z) / ab_len2))
+    local proj_x = a.x + t * ab_x
+    local proj_y = a.y + t * ab_y
+    local proj_z = a.z + t * ab_z
+    return geom.dist3(p[1], p[2], p[3], proj_x, proj_y, proj_z)
+end
+
+-- ── Pick closest vertex to ray ──────────────────────────────────────────────
+function geom.pick_vertex(mesh, ray_orig, ray_dir, max_dist)
+    max_dist = max_dist or 0.35
+    local best_dist = max_dist
+    local best_idx = nil
+    local best_depth = math.huge
+
+    for v_idx, v in ipairs(mesh.verts) do
+        local wx = v.x - ray_orig[1]
+        local wy = v.y - ray_orig[2]
+        local wz = v.z - ray_orig[3]
+        local proj = wx * ray_dir[1] + wy * ray_dir[2] + wz * ray_dir[3]
+        if proj > 0 then
+            local w_len2 = wx * wx + wy * wy + wz * wz
+            local perp2 = w_len2 - (proj * proj)
+            if perp2 >= 0 then
+                local perp = math.sqrt(perp2)
+                if perp < best_dist or (perp < best_dist + 0.05 and proj < best_depth) then
+                    best_dist = perp
+                    best_depth = proj
+                    best_idx = v_idx
+                end
+            end
+        end
+    end
+
+    return best_idx, best_dist
+end
+
 -- ── Normal Calculation ──────────────────────────────────────────────────────
 function geom.calc_face_normal(verts, face_vert_indices)
     if #face_vert_indices < 3 then return { 0, 1, 0 } end
@@ -66,6 +114,22 @@ function geom.recalc_normals(mesh)
     for _, face in ipairs(mesh.faces) do
         face.normal = geom.calc_face_normal(mesh.verts, face.verts)
     end
+end
+
+-- ── Centroid Calculation ────────────────────────────────────────────────────
+function geom.calc_face_centroid(verts, face_vert_indices)
+    local n = #face_vert_indices
+    if n == 0 then return { 0, 0, 0 } end
+    local cx, cy, cz = 0, 0, 0
+    for _, vi in ipairs(face_vert_indices) do
+        local v = verts[vi]
+        if v then
+            cx = cx + v.x
+            cy = cy + v.y
+            cz = cz + v.z
+        end
+    end
+    return { cx / n, cy / n, cz / n }
 end
 
 -- ── Deep Copy ───────────────────────────────────────────────────────────────

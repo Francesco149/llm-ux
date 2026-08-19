@@ -1,16 +1,43 @@
-// winclip.c — Win32 clipboard helpers (Windows cross only).
+// winclip.c — Win32 helpers (Windows cross only).
 // Kept OUT of main.cpp because <windows.h> clashes with raylib's
 // Rectangle/ShowCursor/CloseWindow declarations. Includes windows.h freely.
 #ifdef _WIN32
 
 #include <windows.h>
+#include <commdlg.h>
 #include <shellapi.h>
 #include <wchar.h>
-#include "vendor/tinyfiledialogs/tinyfiledialogs.h"  // tinyfd_winOwner
 
 // raylib's GetWindowHandle (GLFWwindow*) — declared manually because
 // including raylib.h here clashes with windows.h (Rectangle/ShowCursor...).
 extern void *GetWindowHandle(void);
+
+// ── GLFW function pointers (resolved at runtime from glfw3.dll) ─────────────
+typedef HWND (*GlfwGetWin32WindowFn)(void*);
+static GlfwGetWin32WindowFn pfn_glfwGetWin32Window = NULL;
+static int glfw_resolved = 0;
+
+static void resolve_glfw(void) {
+    if (glfw_resolved) return;
+    glfw_resolved = 1;
+    // raylib links glfw3.dll dynamically — look it up by module handle.
+    HMODULE glfw = GetModuleHandleA("glfw3.dll");
+    if (!glfw) glfw = GetModuleHandleA("glfw3");
+    if (!glfw) glfw = GetModuleHandleA("libglfw3.dll");
+    if (!glfw) return;
+    pfn_glfwGetWin32Window = (GlfwGetWin32WindowFn)
+        GetProcAddress(glfw, "glfwGetWin32Window");
+}
+// Resolve HWND from GLFW window handle.
+static HWND get_app_hwnd(void) {
+    resolve_glfw();
+    void *gw = GetWindowHandle();
+    if (gw && pfn_glfwGetWin32Window)
+        return pfn_glfwGetWin32Window(gw);
+    return NULL;
+}
+
+// ── Clipboard ───────────────────────────────────────────────────────────────
 
 // Returns the first file path from the clipboard (CF_HDROP, i.e. files copied
 // in Explorer), UTF-8 encoded, or NULL when the clipboard holds no files.
@@ -67,25 +94,49 @@ const char* win_clipboard_text(void) {
     return (out[0] != '\0') ? out : NULL;
 }
 
-// Resolve the app's Win32 HWND from GLFW at runtime (raylib links glfw3.dll
-// internally; we cannot link it directly, so use GetProcAddress), make the
-// window foreground, and hand the HWND to tinyfiledialogs as the dialog
-// OWNER. Without an owner the native file dialog can appear behind the app
-// window and look like it never opened.
-void win_prepare_file_dialog(void) {
-    typedef HWND (*GlfwGetWin32WindowFn)(void*);
-    HMODULE glfw = GetModuleHandleA("glfw3.dll");
-    static GlfwGetWin32WindowFn glfwGetWin32Window = NULL;
-    if (glfw && !glfwGetWin32Window)
-        glfwGetWin32Window = (GlfwGetWin32WindowFn)GetProcAddress(glfw, "glfwGetWin32Window");
-    void* glfwWindow = GetWindowHandle();  // raylib: GLFWwindow*
-    if (glfwWindow && glfwGetWin32Window) {
-        HWND hwnd = glfwGetWin32Window(glfwWindow);
-        if (hwnd) {
-            tinyfd_winOwner = hwnd;
-            SetForegroundWindow(hwnd);
-        }
+// ── Native file dialog (direct Win32 GetOpenFileNameW) ──────────────────────
+// Bypasses tinyfiledialogs entirely; uses the Win32 common dialog with the app
+// window as owner so it always opens in front.  Returns UTF-8 path or NULL.
+const char* win_open_file_dialog(void) {
+    static char result[4096];
+    result[0] = '\0';
+
+    HWND hwnd = get_app_hwnd();
+
+    // Initialize COM on the UI thread for the modern shell dialog
+    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+
+    // Filter: double-null terminated, description\0patterns\0 pairs.
+    static const wchar_t filter[] =
+        L"Image files (*.png;*.jpg;*.bmp;*.tga;*.gif;*.qoi;*.ico)\0"
+        L"*.png;*.jpg;*.jpeg;*.bmp;*.tga;*.gif;*.qoi;*.ico\0"
+        L"All files (*.*)\0*.*\0\0";
+
+    wchar_t file_buf[2048];
+    file_buf[0] = L'\0';
+
+    OPENFILENAMEW ofn;
+    ZeroMemory(&ofn, sizeof(ofn));
+    ofn.lStructSize     = sizeof(ofn);
+    ofn.hwndOwner       = hwnd;
+    ofn.lpstrFilter     = filter;
+    ofn.nFilterIndex    = 1;
+    ofn.lpstrFile       = file_buf;
+    ofn.nMaxFile        = sizeof(file_buf) / sizeof(file_buf[0]);
+    ofn.lpstrTitle      = L"Open Texture";
+    ofn.Flags           = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+
+    BOOL ok = GetOpenFileNameW(&ofn);
+
+    if (SUCCEEDED(hr)) {
+        CoUninitialize();
     }
+
+    if (!ok) return NULL;
+
+    int len = WideCharToMultiByte(CP_UTF8, 0, file_buf, -1, result, (int)sizeof(result), NULL, NULL);
+    if (len <= 1) return NULL;
+    return result;
 }
 
 #endif // _WIN32

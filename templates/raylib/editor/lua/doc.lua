@@ -6,6 +6,8 @@ local doc = {
     meshes = {},
     selected_mesh_idx = 1,
     selected_face_idx = 3, -- Default to top face of initial cube
+    selected_vert_idx = nil,
+    selected_edge = nil,
     mode = 3, -- 1: Vertex, 2: Edge, 3: Face, 4: Paint
     brush = {
         radius = 1.2,
@@ -38,11 +40,11 @@ function doc.init_default()
     doc.meshes = { box }
     doc.selected_mesh_idx = 1
     doc.selected_face_idx = 3 -- Top face
+    doc.selected_vert_idx = nil
+    doc.selected_edge = nil
     doc.mode = 3
     doc.action = nil
     doc.action_orig = nil
-    doc.action_data = nil
-    doc.dirty = false
     doc.canvas.tex_id = nil
     doc.canvas.stroke_active = false
     doc.canvas.last_stamp = nil
@@ -61,11 +63,14 @@ function doc.snapshot()
         meshes = snap_meshes,
         selected_mesh_idx = doc.selected_mesh_idx,
         selected_face_idx = doc.selected_face_idx,
+        selected_vert_idx = doc.selected_vert_idx,
+        selected_edge = doc.selected_edge and { vi1 = doc.selected_edge.vi1, vi2 = doc.selected_edge.vi2, face_idx = doc.selected_edge.face_idx },
         mode = doc.mode,
         brush = {
             radius = doc.brush.radius,
             color = { doc.brush.color[1], doc.brush.color[2], doc.brush.color[3] },
             strength = doc.brush.strength,
+            hardness = doc.brush.hardness,
         },
     }
 end
@@ -79,6 +84,8 @@ function doc.restore(snap)
     doc.meshes = restored_meshes
     doc.selected_mesh_idx = snap.selected_mesh_idx
     doc.selected_face_idx = snap.selected_face_idx
+    doc.selected_vert_idx = snap.selected_vert_idx
+    doc.selected_edge = snap.selected_edge
     doc.mode = snap.mode or doc.mode
     if snap.brush then
         doc.brush.radius = snap.brush.radius or doc.brush.radius
@@ -152,6 +159,89 @@ function doc.select_at(mx, my)
     local ray_orig = { ox, oy, oz }
     local ray_dir = { dx, dy, dz }
 
+    -- Mode 1: Vertex Selection
+    if doc.mode == 1 then
+        local best_mesh_idx = nil
+        local best_vert_idx = nil
+        local min_dist = math.huge
+
+        for m_idx, mesh in ipairs(doc.meshes) do
+            local vi, d = geom.pick_vertex(mesh, ray_orig, ray_dir, 0.5)
+            if vi and d < min_dist then
+                min_dist = d
+                best_mesh_idx = m_idx
+                best_vert_idx = vi
+            end
+        end
+
+        if best_mesh_idx and best_vert_idx then
+            doc.selected_mesh_idx = best_mesh_idx
+            doc.selected_vert_idx = best_vert_idx
+            doc.selected_face_idx = nil
+            doc.selected_edge = nil
+            doc.status_msg = string.format("Selected Vertex #%d on %s",
+                best_vert_idx, doc.meshes[best_mesh_idx].name or "Mesh")
+            return true
+        else
+            doc.selected_vert_idx = nil
+            return false
+        end
+    end
+
+    -- Mode 2: Edge Selection
+    if doc.mode == 2 then
+        local best_dist = math.huge
+        local best_mesh_idx = nil
+        local best_face_idx = nil
+        local best_hit = nil
+
+        for m_idx, mesh in ipairs(doc.meshes) do
+            local hit = geom.raycast_mesh(mesh, ray_orig, ray_dir)
+            if hit and hit.dist < best_dist then
+                best_dist = hit.dist
+                best_mesh_idx = m_idx
+                best_face_idx = hit.face_idx
+                best_hit = hit
+            end
+        end
+
+        if best_mesh_idx and best_face_idx and best_hit then
+            local mesh = doc.meshes[best_mesh_idx]
+            local face = mesh.faces[best_face_idx]
+            local fv = face.verts
+            local num_v = #fv
+            local min_edge_d = math.huge
+            local best_e1, best_e2 = nil, nil
+
+            for i = 1, num_v do
+                local vi1 = fv[i]
+                local vi2 = fv[(i % num_v) + 1]
+                local va = mesh.verts[vi1]
+                local vb = mesh.verts[vi2]
+                if va and vb then
+                    local d = geom.dist_point_to_segment(best_hit.hit_point, va, vb)
+                    if d < min_edge_d then
+                        min_edge_d = d
+                        best_e1 = vi1
+                        best_e2 = vi2
+                    end
+                end
+            end
+
+            doc.selected_mesh_idx = best_mesh_idx
+            doc.selected_edge = { vi1 = best_e1, vi2 = best_e2, face_idx = best_face_idx }
+            doc.selected_vert_idx = nil
+            doc.selected_face_idx = nil
+            doc.status_msg = string.format("Selected Edge (%d - %d) on %s",
+                best_e1, best_e2, mesh.name or "Mesh")
+            return true, best_hit
+        else
+            doc.selected_edge = nil
+            return false, nil
+        end
+    end
+
+    -- Mode 3 (or other): Face Selection
     local best_dist = math.huge
     local best_mesh_idx = nil
     local best_face_idx = nil
@@ -170,11 +260,12 @@ function doc.select_at(mx, my)
     if best_mesh_idx and best_face_idx then
         doc.selected_mesh_idx = best_mesh_idx
         doc.selected_face_idx = best_face_idx
+        doc.selected_vert_idx = nil
+        doc.selected_edge = nil
         doc.status_msg = string.format("Selected Face #%d on %s",
             best_face_idx, doc.meshes[best_mesh_idx].name or "Mesh")
         return true, best_hit
     else
-        -- Clicking in empty space deselects face
         doc.selected_face_idx = nil
         return false, nil
     end
@@ -198,19 +289,21 @@ function doc.invalidate_model(mesh_idx)
 end
 
 -- Re-create a GPU model from the CURRENT (possibly edited) geometry and
--- re-apply its texture binding. Called after modal commit/cancel.
+-- re-apply its texture binding. Live updates unload the old model and reload.
 function doc.rebuild_model(mesh_idx)
     local m = doc.meshes[mesh_idx]
     if not m then return end
     if not (lp and lp.rl and lp.rl.load_model_mesh) then return end
     if not _G.gl_ready then return end  -- GL-free in --test
-    if m.model_id then return end  -- already present
+    if m.model_id and lp and lp.rl and lp.rl.unload_model then
+        lp.rl.unload_model(m.model_id)
+        m.model_id = nil
+    end
     local vf, idx = geom.mesh_to_gl(m)
     if #vf == 0 or #idx == 0 then return end
     m.model_id = lp.rl.load_model_mesh(vf, idx)
     doc.apply_tex_binding(m)
 end
-
 -- Re-apply the mesh's recorded texture binding to its GPU model.
 function doc.apply_tex_binding(m)
     if not m or not m.model_id then return end
@@ -232,9 +325,7 @@ function doc.start_extrude(mx, my)
         doc.status_msg = "Select a face to extrude"
         return
     end
-
     doc.action_orig = doc.snapshot()
-    doc.invalidate_model(doc.selected_mesh_idx)  -- live geometry edit: drop GPU model
 
     local normal = face.normal or geom.calc_face_normal(mesh.verts, face.verts)
     local orig_verts = face.verts
@@ -277,32 +368,51 @@ function doc.update_extrude(mx, my)
     data.dist = dy
 
     geom.set_extrude_offset(mesh, data.cap_verts, data.orig_positions, data.normal, dy)
+    doc.rebuild_model(data.mesh_idx)
 end
 
 -- ── Modal Tool: Move (G) ────────────────────────────────────────────────────
 function doc.start_move(mx, my)
     if doc.action then return end
     local mesh = doc.get_active_mesh()
-    local face = doc.get_active_face()
-    if not (mesh and face and doc.selected_face_idx) then
-        doc.status_msg = "Select a face to move"
+    if not mesh then return end
+
+    local vert_indices = {}
+    local orig_positions = {}
+
+    if doc.mode == 1 and doc.selected_vert_idx then
+        local vi = doc.selected_vert_idx
+        local v = mesh.verts[vi]
+        if not v then return end
+        vert_indices = { vi }
+        orig_positions = { { x = v.x, y = v.y, z = v.z } }
+    elseif doc.mode == 2 and doc.selected_edge then
+        local e = doc.selected_edge
+        local v1 = mesh.verts[e.vi1]
+        local v2 = mesh.verts[e.vi2]
+        if not (v1 and v2) then return end
+        vert_indices = { e.vi1, e.vi2 }
+        orig_positions = {
+            { x = v1.x, y = v1.y, z = v1.z },
+            { x = v2.x, y = v2.y, z = v2.z },
+        }
+    elseif doc.selected_face_idx and mesh.faces[doc.selected_face_idx] then
+        local face = mesh.faces[doc.selected_face_idx]
+        local touched = {}
+        for _, vi in ipairs(face.verts) do
+            if not touched[vi] then
+                touched[vi] = true
+                vert_indices[#vert_indices + 1] = vi
+                local v = mesh.verts[vi]
+                orig_positions[#orig_positions + 1] = { x = v.x, y = v.y, z = v.z }
+            end
+        end
+    else
+        doc.status_msg = "Select a vertex, edge, or face to move"
         return
     end
 
     doc.action_orig = doc.snapshot()
-    doc.invalidate_model(doc.selected_mesh_idx)  -- live geometry edit: drop GPU model
-
-    local touched = {}
-    local vert_indices = {}
-    local orig_positions = {}
-    for _, vi in ipairs(face.verts) do
-        if not touched[vi] then
-            touched[vi] = true
-            vert_indices[#vert_indices + 1] = vi
-            local v = mesh.verts[vi]
-            orig_positions[#orig_positions + 1] = { x = v.x, y = v.y, z = v.z }
-        end
-    end
 
     doc.action = "move"
     doc.action_data = {
@@ -345,10 +455,9 @@ function doc.update_move(mx, my, cam)
         (dmx * right_z - dmy * up_z) * scale,
     }
     data.delta = delta_vec
-
     geom.set_move_positions(mesh, data.vert_indices, data.orig_positions, delta_vec)
+    doc.rebuild_model(data.mesh_idx)
 end
-
 -- ── Modal Confirm / Cancel ──────────────────────────────────────────────────
 function doc.confirm_action()
     if not doc.action then return end
@@ -386,13 +495,15 @@ function doc.paint_stroke(mx, my)
     local ray_dir = { dx, dy, dz }
 
     local best_dist = math.huge
+    local best_mesh_idx = nil
     local best_mesh = nil
     local best_hit = nil
 
-    for _, mesh in ipairs(doc.meshes) do
+    for m_idx, mesh in ipairs(doc.meshes) do
         local hit = geom.raycast_mesh(mesh, ray_orig, ray_dir)
         if hit and hit.dist < best_dist then
             best_dist = hit.dist
+            best_mesh_idx = m_idx
             best_mesh = mesh
             best_hit = hit
         end
@@ -403,6 +514,7 @@ function doc.paint_stroke(mx, my)
         local mod = geom.paint_vertices(best_mesh, best_hit.hit_point,
             doc.brush.radius, doc.brush.color, doc.brush.strength, doc.brush.hardness)
         if mod then
+            doc.rebuild_model(best_mesh_idx)
             doc.dirty = true
             doc.status_msg = "Painting vertex colors"
         end

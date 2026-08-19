@@ -6,16 +6,19 @@
 #include <cmath>
 #include <vector>
 #ifdef _WIN32
-// Win32 clipboard helpers live in src/winclip.c (windows.h clashes with
-// raylib's Rectangle/ShowCursor/CloseWindow when included here).
+// Win32 helpers live in src/winclip.c (windows.h clashes with raylib's
+// Rectangle/ShowCursor/CloseWindow when included here).
 extern "C" const char* win_clipboard_file_path(void);
 extern "C" const char* win_clipboard_text(void);
-extern "C" void win_prepare_file_dialog(void);
+extern "C" const char* win_open_file_dialog(void);
 #endif
 
 #include "raylib.h"
 #include "raymath.h"
-#include "vendor/tinyfiledialogs/tinyfiledialogs.h"  // native file picker
+#include "rlgl.h"
+#ifndef _WIN32
+#include "vendor/tinyfiledialogs/tinyfiledialogs.h"  // native file picker (Linux only)
+#endif
 #include "imgui.h"
 #include "rlImGui.h"
 
@@ -581,21 +584,22 @@ static int l_rl_take_dropped_file(lua_State* L) {
     return 1;
 }
 
-// lp.app.open_file_dialog() -> path or nil — native file picker (vendored
-// tinyfiledialogs; zenity/kdialog/portal on Linux, native dialogs on Windows).
+// lp.app.open_file_dialog() -> path or nil — native file picker.
+// Windows: direct Win32 GetOpenFileNameW (winclip.c), always reliable.
+// Linux: tinyfiledialogs (zenity/kdialog).
 static int l_app_open_file_dialog(lua_State* L) {
+    const char* path = nullptr;
 #ifdef _WIN32
-    // Own the dialog to our window so it appears above the app (ownerless
-    // dialogs can open behind and look like they never opened).
-    win_prepare_file_dialog();
-#endif
-    const char* path = tinyfd_openFileDialog(
+    path = win_open_file_dialog();
+#else
+    path = tinyfd_openFileDialog(
         "Open Texture (png/jpg/bmp/tga/gif/qoi)",
-        ".",
+        "",
         8,
         (const char* const[]){"*.png", "*.jpg", "*.jpeg", "*.bmp", "*.tga", "*.gif", "*.qoi", "*.ico"},
         "Image files",
         0);
+#endif
     if (path && *path) { lua_pushstring(L, path); return 1; }
     lua_pushnil(L);
     return 1;
@@ -1508,20 +1512,31 @@ static const char* get_arg(int argc, char** argv, const char* name, const char* 
     return def;
 }
 
+
 int main(int argc, char** argv) {
     const char* shot_path = get_arg(argc, argv, "--shot", nullptr);
     int shot_frames = atoi(get_arg(argc, argv, "--frames", "20"));
     const char* drive_script = get_arg(argc, argv, "--drive", nullptr);
     bool headless = shot_path != nullptr;
 
+    // Find root dir: prefer cwd if it contains lua (dev or packaged layout),
+    // else the exe's own directory (packaged: exe sits next to lua/).
+    char root[2048];
+    if (FileExists("editor/lua/main.lua") || FileExists("lua/main.lua")) {
+        snprintf(root, sizeof(root), ".");
+    } else {
+        snprintf(root, sizeof(root), "%s", GetApplicationDirectory());
+        ChangeDirectory(root);
+    }
+
     if (has_arg(argc, argv, "--test")) {
         // Headless boot check: VM + main.lua load, no window/GL needed.
-        lua_init(".");
+        lua_init(root);
         // Run the headless test suite if it exists (dev or packaged layout).
-        const char* candidates[] = {
-            "./editor/tests/testmain.lua",
-            "./tests/testmain.lua",
-        };
+        char t1[2048], t2[2048];
+        snprintf(t1, sizeof(t1), "%s/editor/tests/testmain.lua", root);
+        snprintf(t2, sizeof(t2), "%s/tests/testmain.lua", root);
+        const char* candidates[] = { t1, t2, "./editor/tests/testmain.lua", "./tests/testmain.lua" };
         const char* found = nullptr;
         for (const char* c : candidates) if (FileExists(c)) { found = c; break; }
         if (found) {
@@ -1536,16 +1551,6 @@ int main(int argc, char** argv) {
         lua_shutdown();
         return 0;
     }
-
-    // Find root dir: prefer cwd if it contains lua (dev or packaged layout),
-    // else the exe's own directory (packaged: exe sits next to lua/).
-    char root[2048];
-    if (FileExists("editor/lua/main.lua") || FileExists("lua/main.lua")) {
-        snprintf(root, sizeof(root), ".");
-    } else {
-        snprintf(root, sizeof(root), "%s", GetApplicationDirectory());
-    }
-
     uint32_t cfg = FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_RESIZABLE;
     if (headless) cfg |= FLAG_WINDOW_HIDDEN;  // render without stealing focus
     SetConfigFlags(cfg);
@@ -1555,7 +1560,6 @@ int main(int argc, char** argv) {
     setup_imgui_fonts_and_theme();  // modern dark theme + CJK/Cyrillic fonts
 
     lua_init(root);
-
     // Load the headless drive tape (schedules per-frame input injections)
     bool drive_loaded = false;
     if (drive_script) {
@@ -1580,6 +1584,7 @@ int main(int argc, char** argv) {
         // once per frame; a second early poll clears the pressed-queues that
         // EndDrawing just filled → clicks landing mid-frame get dropped
         // (intermittent unresponsiveness). One poll per frame is correct.
+
         // Drive step BEFORE input is read: executes this frame's plan + boundary
         if (drive_loaded) lp_call_global("drive_step");
 
@@ -1611,7 +1616,6 @@ int main(int argc, char** argv) {
         }
         lua_frame();
         rlImGuiEnd();
-
         EndDrawing();
         frame++;
 

@@ -275,7 +275,7 @@ ok(type(lp.file.exists) == "function", "file.exists")
 -- In-app file browser: lists the repo's own files (headless-safe)
 local fdirs, ffiles = lp.file.list_dir(".")
 ok(type(fdirs) == "table" and type(ffiles) == "table", "list_dir returns dirs + files tables")
-ok(lp.file.exists("editor/lua/main.lua") == true, "file.exists finds editor/lua/main.lua")
+ok(lp.file.exists("editor/lua/main.lua") == true or lp.file.exists("lua/main.lua") == true, "file.exists finds main.lua")
 ok(lp.file.exists("definitely_missing_xyz") == false, "file.exists false for missing")
 
 -- Rejection: nonexistent / unsupported paths return false, canvas untouched
@@ -293,6 +293,23 @@ local ok_good = tex.load_image_from_file(imp_tid, "build/import_roundtrip.png")
 ok(ok_good == true, "load_image_from_file loads exported png")
 ok(tex.get_pixel(imp_tid, 5, 5) == 0xFF0000FF, "round-trip preserves pixel data")
 
+
+-- 11. Selection Modes (Mode 1: Vertex, Mode 2: Edge, Mode 3: Face)
+local test_box = geom.create_box(0, 1, 0, 2, 2, 2)
+local ray_orig = { 0, 5, 0 }
+local ray_dir = { 0, -1, 0 }
+
+-- Mode 1: pick_vertex finds top vertex
+local vi, vd = geom.pick_vertex(test_box, { 1, 5, 1 }, { 0, -1, 0 }, 0.5)
+ok(vi ~= nil and vd < 0.1, "geom.pick_vertex finds close vertex")
+
+-- Mode 2: dist_point_to_segment
+local p_seg = geom.dist_point_to_segment({ 0, 2, 1 }, { x = -1, y = 2, z = 1 }, { x = 1, y = 2, z = 1 })
+ok(p_seg < 1e-5, "dist_point_to_segment zero for point on segment")
+
+-- Centroid calculation
+local c_top = geom.calc_face_centroid(test_box.verts, test_box.faces[3].verts)
+ok(math.abs(c_top[1]) < 1e-5 and math.abs(c_top[2] - 2.0) < 1e-5 and math.abs(c_top[3]) < 1e-5, "calc_face_centroid returns top face center (0, 2, 0)")
 if fails > 0 then
     print(string.format("FAIL: %d checks failed", fails))
     os.exit(1)

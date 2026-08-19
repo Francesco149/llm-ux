@@ -20,7 +20,6 @@ local rl = lp.rl
 local geom = require("geom")
 local undo = require("undo")
 local doc = require("doc")
-local filebrowser = require("filebrowser")
 
 -- ── Camera State ────────────────────────────────────────────────────────────
 local cam = {
@@ -65,11 +64,10 @@ local function setup_scene()
     -- GPU resources (GL is live here — first rendered frame):
     -- 1) the default box gets a GPU model + perlin texture (default look)
     local m1 = doc.meshes[1]
-    if m1 and m1.kind == "box" and m1.dims and not m1.model_id then
-        m1.model_id = rl.load_model_cube(m1.dims.w, m1.dims.h, m1.dims.d)
+    if m1 and not m1.model_id then
         doc.perlin_tex_id = rl.load_texture_perlin(256, 256, 2.0)
-        rl.set_material_texture(m1.model_id, rl.MAP_ALBEDO, doc.perlin_tex_id)
         m1.tex_binding = { kind = "perlin" }  -- survives model rebuilds
+        doc.rebuild_model(1)
     end
     -- 2) the offscreen 512x512 paint canvas (white)
     doc.canvas_init()
@@ -81,15 +79,7 @@ end
 -- (flat-shaded fallback); restored snapshots clone without GPU ids.
 local function ensure_mesh_model(mesh, m_idx)
     if mesh.model_id then return end
-    if mesh.kind == "box" and mesh.dims then
-        mesh.model_id = rl.load_model_cube(mesh.dims.w, mesh.dims.h, mesh.dims.d)
-    elseif mesh.kind == "cylinder" and mesh.dims then
-        mesh.model_id = rl.load_model_cylinder(mesh.dims.r, mesh.dims.h, 16)
-    end
-    if mesh.model_id then
-        -- Re-apply the recorded texture binding (perlin default or canvas).
-        doc.apply_tex_binding(mesh)
-    end
+    doc.rebuild_model(m_idx)
 end
 
 -- Enter 2D texture-paint mode: the canvas becomes the active mesh's texture.
@@ -432,47 +422,41 @@ end
 -- ── 3D Scene Rendering ──────────────────────────────────────────────────────
 local LIGHT_DIR = geom.normalize({ 0.45, 0.85, 0.35 })
 
+local function offset_pt(v, norm, dist)
+    return {
+        x = v.x + norm[1] * dist,
+        y = v.y + norm[2] * dist,
+        z = v.z + norm[3] * dist,
+    }
+end
+
+-- Base shaded triangle rendering for untextured / geometry-edited meshes
 local function render_mesh_3d(mesh, is_active_mesh)
     local verts = mesh.verts
     local faces = mesh.faces
 
-    for f_idx, face in ipairs(faces) do
+    for _, face in ipairs(faces) do
         local fv = face.verts
         local num_v = #fv
-        local is_sel_face = (is_active_mesh and f_idx == doc.selected_face_idx)
 
-        -- Normal & Directional Light Dot
         local norm = face.normal or geom.calc_face_normal(verts, fv)
         local dot = geom.dot(norm, LIGHT_DIR)
         local lit = math.max(0.25, math.min(1.0, 0.35 + 0.65 * dot))
-
-        -- Base face color
         local fc = face.color or { 170, 190, 215, 255 }
 
-        -- Fan triangulation for quad / n-gon
         if num_v >= 3 then
             local v0 = verts[fv[1]]
             for i = 2, num_v - 1 do
                 local v1 = verts[fv[i]]
                 local v2 = verts[fv[i + 1]]
                 if v0 and v1 and v2 then
-                    local r, g, b
+                    local avg_vr = ((v0.r or fc[1]) + (v1.r or fc[1]) + (v2.r or fc[1])) / 3.0
+                    local avg_vg = ((v0.g or fc[2]) + (v1.g or fc[2]) + (v2.g or fc[2])) / 3.0
+                    local avg_vb = ((v0.b or fc[3]) + (v1.b or fc[3]) + (v2.b or fc[3])) / 3.0
 
-                    if is_sel_face then
-                        -- Selected face highlight: warm golden amber
-                        r = math.floor(math.min(255, 245 * lit + 30))
-                        g = math.floor(math.min(255, 175 * lit + 20))
-                        b = math.floor(math.min(255, 45 * lit))
-                    else
-                        -- Average vertex colors with face color modulation
-                        local avg_vr = ((v0.r or fc[1]) + (v1.r or fc[1]) + (v2.r or fc[1])) / 3.0
-                        local avg_vg = ((v0.g or fc[2]) + (v1.g or fc[2]) + (v2.g or fc[2])) / 3.0
-                        local avg_vb = ((v0.b or fc[3]) + (v1.b or fc[3]) + (v2.b or fc[3])) / 3.0
-
-                        r = math.floor(math.min(255, avg_vr * lit))
-                        g = math.floor(math.min(255, avg_vg * lit))
-                        b = math.floor(math.min(255, avg_vb * lit))
-                    end
+                    local r = math.floor(math.min(255, avg_vr * lit))
+                    local g = math.floor(math.min(255, avg_vg * lit))
+                    local b = math.floor(math.min(255, avg_vb * lit))
 
                     rl.draw_triangle_3d(
                         v0.x, v0.y, v0.z,
@@ -483,72 +467,193 @@ local function render_mesh_3d(mesh, is_active_mesh)
                 end
             end
         end
-
-        -- Wireframe edges (shared with the textured render path)
-        local wire_r = is_sel_face and 255 or 40
-        local wire_g = is_sel_face and 220 or 50
-        local wire_b = is_sel_face and 60 or 75
-        local wire_a = is_sel_face and 255 or 200
-
-        for i = 1, num_v do
-            local vi1 = fv[i]
-            local vi2 = fv[(i % num_v) + 1]
-            local va = verts[vi1]
-            local vb = verts[vi2]
-            if va and vb then
-                rl.draw_line_3d(va.x, va.y, va.z, vb.x, vb.y, vb.z,
-                    wire_r, wire_g, wire_b, wire_a)
-            end
-        end
-    end
-
-    -- Mode 1 (Vertex Mode): Draw vertex handles
-    if doc.mode == 1 and is_active_mesh then
-        for _, v in ipairs(verts) do
-            rl.draw_sphere(v.x, v.y, v.z, 0.045, 250, 210, 70, 255)
-        end
     end
 end
 
--- Wireframe overlay for textured meshes (selection highlight preserved).
-local function draw_mesh_wire(mesh, is_active_mesh)
+-- Unified 3D selection, wireframe, vertex/edge handles, and gizmo overlays.
+-- Runs identically on top of both textured meshes (rl.draw_model) and
+-- flat-shaded meshes (render_mesh_3d), using normal offsets to guarantee
+-- zero Z-fighting and high-contrast visibility through any texture.
+local function draw_mesh_overlays(mesh, is_active_mesh)
     local verts = mesh.verts
     local faces = mesh.faces
+    local is_face_mode = (doc.mode == 3 or doc.mode == nil)
+    local is_edge_mode = (doc.mode == 2)
+    local is_vert_mode = (doc.mode == 1)
+    local is_paint_mode = (doc.mode == 4)
+
+    -- 1. Wireframe edges (offset slightly along face normal so they never Z-fight)
     for f_idx, face in ipairs(faces) do
         local fv = face.verts
         local num_v = #fv
-        local is_sel_face = (is_active_mesh and f_idx == doc.selected_face_idx)
-        local wire_r = is_sel_face and 255 or 40
-        local wire_g = is_sel_face and 220 or 50
-        local wire_b = is_sel_face and 60 or 75
-        local wire_a = is_sel_face and 255 or 200
+        local is_sel_face = (is_active_mesh and is_face_mode and f_idx == doc.selected_face_idx)
+        local norm = face.normal or geom.calc_face_normal(verts, fv)
+
+        local wire_r = is_sel_face and 255 or (is_edge_mode and 70 or 45)
+        local wire_g = is_sel_face and 220 or (is_edge_mode and 95 or 55)
+        local wire_b = is_sel_face and 60 or (is_edge_mode and 135 or 75)
+        local wire_a = is_sel_face and 255 or (is_active_mesh and 170 or 100)
+        local offset_dist = is_sel_face and 0.004 or 0.002
+
         for i = 1, num_v do
             local vi1 = fv[i]
             local vi2 = fv[(i % num_v) + 1]
             local va = verts[vi1]
             local vb = verts[vi2]
             if va and vb then
-                rl.draw_line_3d(va.x, va.y, va.z, vb.x, vb.y, vb.z,
-                    wire_r, wire_g, wire_b, wire_a)
+                local p1 = offset_pt(va, norm, offset_dist)
+                local p2 = offset_pt(vb, norm, offset_dist)
+                rl.draw_line_3d(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, wire_r, wire_g, wire_b, wire_a)
+            end
+        end
+    end
+
+    -- 2. Mode 3 (Face Mode): Selected Face Highlight (Warm golden amber fill + bright boundary + normal gizmo)
+    if is_active_mesh and is_face_mode and doc.selected_face_idx and faces[doc.selected_face_idx] then
+        local face = faces[doc.selected_face_idx]
+        local fv = face.verts
+        local num_v = #fv
+        local norm = face.normal or geom.calc_face_normal(verts, fv)
+
+        -- Face highlight fill (golden amber wash, offset by normal to prevent Z-fighting)
+        if num_v >= 3 then
+            local v0 = offset_pt(verts[fv[1]], norm, 0.003)
+            for i = 2, num_v - 1 do
+                local v1 = offset_pt(verts[fv[i]], norm, 0.003)
+                local v2 = offset_pt(verts[fv[i + 1]], norm, 0.003)
+                rl.draw_triangle_3d(
+                    v0.x, v0.y, v0.z,
+                    v1.x, v1.y, v1.z,
+                    v2.x, v2.y, v2.z,
+                    245, 185, 40, 180
+                )
+            end
+        end
+
+        -- Bright golden-yellow boundary outline (double thickness via offset)
+        for i = 1, num_v do
+            local vi1 = fv[i]
+            local vi2 = fv[(i % num_v) + 1]
+            local va = verts[vi1]
+            local vb = verts[vi2]
+            if va and vb then
+                local p1 = offset_pt(va, norm, 0.005)
+                local p2 = offset_pt(vb, norm, 0.005)
+                rl.draw_line_3d(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, 255, 230, 65, 255)
+            end
+        end
+
+        -- Centroid normal pip & axis gizmo
+        local centroid = geom.calc_face_centroid(verts, fv)
+        local cb_x = centroid[1] + norm[1] * 0.01
+        local cb_y = centroid[2] + norm[2] * 0.01
+        local cb_z = centroid[3] + norm[3] * 0.01
+        local ct_x = centroid[1] + norm[1] * 0.42
+        local ct_y = centroid[2] + norm[2] * 0.42
+        local ct_z = centroid[3] + norm[3] * 0.42
+        rl.draw_line_3d(cb_x, cb_y, cb_z, ct_x, ct_y, ct_z, 255, 215, 50, 255)
+        rl.draw_sphere(ct_x, ct_y, ct_z, 0.038, 255, 230, 70, 255)
+    end
+
+    -- 3. Mode 2 (Edge Mode): Highlight selected edge with electric cyan + handle pip
+    if is_active_mesh and is_edge_mode and doc.selected_edge then
+        local e = doc.selected_edge
+        local va = verts[e.vi1]
+        local vb = verts[e.vi2]
+        if va and vb then
+            local fn = { 0, 1, 0 }
+            if e.face_idx and faces[e.face_idx] then
+                fn = faces[e.face_idx].normal or geom.calc_face_normal(verts, faces[e.face_idx].verts)
+            end
+            local p1 = offset_pt(va, fn, 0.006)
+            local p2 = offset_pt(vb, fn, 0.006)
+            rl.draw_line_3d(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, 50, 225, 255, 255)
+            local mx = (p1.x + p2.x) * 0.5
+            local my = (p1.y + p2.y) * 0.5
+            local mz = (p1.z + p2.z) * 0.5
+            rl.draw_sphere(mx, my, mz, 0.045, 50, 235, 255, 255)
+        end
+    end
+
+    -- 4. Mode 1 (Vertex Mode): Draw 3D vertex handles with selected vertex highlighted
+    if is_active_mesh and is_vert_mode then
+        for v_idx, v in ipairs(verts) do
+            if doc.selected_vert_idx == v_idx then
+                -- Selected vertex: glowing bright gold sphere
+                rl.draw_sphere(v.x, v.y, v.z, 0.065, 255, 235, 75, 255)
+            else
+                -- Unselected vertex: amber dot
+                rl.draw_sphere(v.x, v.y, v.z, 0.040, 225, 160, 35, 255)
+            end
+        end
+    end
+
+    -- 5. Vertex Paint Mode (Mode 4): Draw vertex spheres with painted RGB color
+    if is_active_mesh and is_paint_mode then
+        for _, v in ipairs(verts) do
+            rl.draw_sphere(v.x, v.y, v.z, 0.048, v.r or 200, v.g or 200, v.b or 200, 255)
+        end
+    end
+
+    -- 6. In-Flight Modal Transform Gizmos (Extrude / Move)
+    if is_active_mesh and doc.action == "extrude" and doc.action_data then
+        local data = doc.action_data
+        if data.orig_positions and data.cap_verts then
+            for _, vi in ipairs(data.cap_verts) do
+                local orig = data.orig_positions[vi]
+                local cur = verts[vi]
+                if orig and cur then
+                    rl.draw_line_3d(orig.x, orig.y, orig.z, cur.x, cur.y, cur.z, 80, 255, 140, 255)
+                end
+            end
+        end
+    end
+
+    -- 7. Hover Highlight (subtle translucent highlight on element under mouse cursor)
+    if is_active_mesh and not doc.action and doc.mode == 3 then
+        local mx, my = rl.get_mouse_pos()
+        local ox, oy, oz, dx, dy, dz = lp.rl.get_ray(mx, my)
+        local hit = geom.raycast_mesh(mesh, { ox, oy, oz }, { dx, dy, dz })
+        if hit and hit.face_idx and hit.face_idx ~= doc.selected_face_idx then
+            local face = faces[hit.face_idx]
+            if face then
+                local fv = face.verts
+                local num_v = #fv
+                local norm = face.normal or geom.calc_face_normal(verts, fv)
+                if num_v >= 3 then
+                    local v0 = offset_pt(verts[fv[1]], norm, 0.002)
+                    for i = 2, num_v - 1 do
+                        local v1 = offset_pt(verts[fv[i]], norm, 0.002)
+                        local v2 = offset_pt(verts[fv[i + 1]], norm, 0.002)
+                        rl.draw_triangle_3d(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z, 190, 225, 255, 75)
+                    end
+                end
+                for i = 1, num_v do
+                    local vi1 = fv[i]
+                    local vi2 = fv[(i % num_v) + 1]
+                    local va = verts[vi1]
+                    local vb = verts[vi2]
+                    if va and vb then
+                        local p1 = offset_pt(va, norm, 0.003)
+                        local p2 = offset_pt(vb, norm, 0.003)
+                        rl.draw_line_3d(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z, 150, 210, 255, 170)
+                    end
+                end
             end
         end
     end
 end
-
 -- ── 3D Viewport Drawing (Called inside BeginMode3D) ─────────────────────────
 function lp_draw3d()
     setup_scene()
     handle_viewport_input()
 
     -- Mode 5: the 3D scene is hidden; the 2D canvas view draws in lp_draw2d
-    -- (after EndMode3D, where raylib 6.0's BeginMode2D has the ortho base)
     if doc.mode == 5 then
         return
     end
 
-    -- Ground reference grid. Drawn MANUALLY 2cm below y=0: raylib's
-    -- DrawGrid sits exactly at y=0 where the cube's bottom face is — coplanar
-    -- geometry z-fights (flicker at cube/grid edges). The offset kills it.
+    -- Ground reference grid
     local GRID_Y = -0.02
     for i = -10, 10 do
         local alpha = (i % 5 == 0) and 90 or 30
@@ -556,22 +661,17 @@ function lp_draw3d()
         rl.draw_line_3d(-10, GRID_Y, i, 10, GRID_Y, i, 200, 200, 200, alpha)
     end
 
-    -- Render all document meshes with hardware depth testing. Meshes with a
-    -- GPU model (pristine primitives) render textured — the canvas texture
-    -- applied via lp.tex.apply_to_model is the 2D→3D bridge; everything else
-    -- falls back to the flat-shaded renderer.
+    -- Render all document meshes (textured GPU model with Gouraud vertex color gradient)
     for m_idx, mesh in ipairs(doc.meshes) do
         local is_active = (m_idx == doc.selected_mesh_idx)
         if mesh.model_id then
             ensure_mesh_model(mesh, m_idx)
-            local o = mesh.origin or { x = 0, y = 0, z = 0 }
-            rl.draw_model(mesh.model_id, o.x, o.y, o.z, 1.0, 255, 255, 255, 255)
-            draw_mesh_wire(mesh, is_active)
+            rl.draw_model(mesh.model_id, 0, 0, 0, 1.0, 255, 255, 255, 255)
         else
             render_mesh_3d(mesh, is_active)
         end
+        draw_mesh_overlays(mesh, is_active)
     end
-
     -- Paint Mode: draw 3D brush indicator at ray hit point
     if doc.mode == 4 and not doc.action then
         local mx, my = rl.get_mouse_pos()
@@ -588,8 +688,6 @@ function lp_draw3d()
         if best_hit then
             local hp = best_hit.hit_point
             local bc = doc.brush.color
-            -- Reticle at the TRUE world-space brush radius (was radius*0.15 —
-            -- 6.7x smaller than the painted region; that mismatch is a footgun).
             rl.draw_sphere_wires(hp[1], hp[2], hp[3], doc.brush.radius, 12, 12, bc[1], bc[2], bc[3], 255)
         end
     end
@@ -700,19 +798,25 @@ function lp_frame()
         ig.same_line()
 
         -- Modal Tools
-        local has_sel = (doc.selected_face_idx ~= nil)
-        if not has_sel then ig.begin_disabled(true) end
+        local can_extrude = (doc.selected_face_idx ~= nil)
+        local can_move = (doc.mode == 1 and doc.selected_vert_idx ~= nil)
+            or (doc.mode == 2 and doc.selected_edge ~= nil)
+            or (doc.selected_face_idx ~= nil)
+
+        if not can_extrude then ig.begin_disabled(true) end
         if ig.button("Extrude (E)") then
             local mx, my = rl.get_mouse_pos()
             doc.start_extrude(mx, my)
         end
+        if not can_extrude then ig.end_disabled() end
+
         ig.same_line()
+        if not can_move then ig.begin_disabled(true) end
         if ig.button("Move (G)") then
             local mx, my = rl.get_mouse_pos()
             doc.start_move(mx, my)
         end
-        if not has_sel then ig.end_disabled() end
-
+        if not can_move then ig.end_disabled() end
         ig.same_line()
         ig.text_colored("|", 0.4, 0.4, 0.45, 1.0)
         ig.same_line()
@@ -814,7 +918,7 @@ function lp_frame()
 
         -- Selection Mode Pills (1..4 = 3D, 5 = 2D texture paint)
         ig.text("Selection Mode:")
-        local mode_names = { "1: Vertex", "2: Edge", "3: Face", "4: Paint", "5: Tex Paint" }
+        local mode_names = { "1: Vertex", "2: Edge", "3: Face", "4: Vert Paint", "5: Tex Paint" }
         for m = 1, 5 do
             if m == 2 or m == 4 then ig.same_line() end  -- 2 per row
             local is_active = (doc.mode == m)
@@ -834,23 +938,30 @@ function lp_frame()
 
         -- Geometry Actions
         ig.text("Actions:")
-        local has_sel = (doc.selected_face_idx ~= nil)
-        if not has_sel then ig.begin_disabled(true) end
+        local can_extrude = (doc.selected_face_idx ~= nil)
+        local can_move = (doc.mode == 1 and doc.selected_vert_idx ~= nil)
+            or (doc.mode == 2 and doc.selected_edge ~= nil)
+            or (doc.selected_face_idx ~= nil)
+
+        if not can_extrude then ig.begin_disabled(true) end
         if ig.button("Extrude (E)", 120, 28) then
             local mx, my = rl.get_mouse_pos()
             doc.start_extrude(mx, my)
         end
+        if not can_extrude then ig.end_disabled() end
+
         ig.same_line()
+        if not can_move then ig.begin_disabled(true) end
         if ig.button("Move (G)", 120, 28) then
             local mx, my = rl.get_mouse_pos()
             doc.start_move(mx, my)
         end
-        if not has_sel then ig.end_disabled() end
-
+        if not can_move then ig.end_disabled() end
         ig.separator()
 
-        -- Vertex Painting Settings
-        ig.text("Vertex Paint Brush:")
+        -- Vertex Painting Settings (Mode 4)
+        ig.text("Mode 4: Vertex Paint (3D Surface Tint):")
+        ig.text_colored("Paints vertex RGB colors (blends with texture)", 0.55, 0.6, 0.65, 1.0)
         local r_chg, new_rad = ig.slider_float("Radius##brush", doc.brush.radius, 0.2, 4.0)
         if r_chg then doc.brush.radius = new_rad end
 
@@ -876,7 +987,8 @@ function lp_frame()
 
         -- 2D Texture Canvas (mode 5): live preview + stroke controls.
         -- The preview draws the GPU texture via the window draw list.
-        ig.text("2D Texture Canvas:")
+        ig.text("Mode 5: 2D Texture Paint (UV Canvas):")
+        ig.text_colored("Paints 2D bitmap -> UV mapped onto 3D mesh", 0.55, 0.6, 0.65, 1.0)
         if doc.canvas.tex_id then
             local tid = doc.canvas.tex_id
             local gl_id = lp.tex.texture_id(tid)
@@ -895,18 +1007,11 @@ function lp_frame()
             ig.text_colored("Texture → Cube (2D↔3D)", 0.95, 0.7, 0.2, 1.0)
             ig.text_colored("Drop · Ctrl+V · Open — import an image", 0.6, 0.65, 0.7, 1.0)
             if ig.button("Load Texture…") then
-                -- The in-app browser is the reliable file picker everywhere
-                -- (tinyfiledialogs needs zenity/kdialog on Linux — absent
-                -- under WSLg; "System…" below tries the native dialog).
-                filebrowser.open(".", import_image)
-            end
-            ig.same_line()
-            if ig.button("System…") then
                 local path = lp.app.open_file_dialog()
                 if path then
                     import_image(path)
                 else
-                    doc.status_msg = "System dialog unavailable — use Load Texture…"
+                    doc.status_msg = "No file selected"
                 end
             end
             ig.same_line()
@@ -935,10 +1040,24 @@ function lp_frame()
         local active_m = doc.get_active_mesh()
         if active_m then
             ig.text(string.format("  Active: %s", active_m.name or "Mesh"))
-            if doc.selected_face_idx then
-                ig.text_colored(string.format("  Selected Face: #%d", doc.selected_face_idx), 0.95, 0.7, 0.2, 1.0)
+            if doc.mode == 1 then
+                if doc.selected_vert_idx then
+                    ig.text_colored(string.format("  Selected Vertex: #%d", doc.selected_vert_idx), 0.95, 0.7, 0.2, 1.0)
+                else
+                    ig.text_colored("  No vertex selected", 0.55, 0.55, 0.6, 1.0)
+                end
+            elseif doc.mode == 2 then
+                if doc.selected_edge then
+                    ig.text_colored(string.format("  Selected Edge: (%d - %d)", doc.selected_edge.vi1, doc.selected_edge.vi2), 0.2, 0.85, 1.0, 1.0)
+                else
+                    ig.text_colored("  No edge selected", 0.55, 0.55, 0.6, 1.0)
+                end
             else
-                ig.text_colored("  No face selected", 0.55, 0.55, 0.6, 1.0)
+                if doc.selected_face_idx then
+                    ig.text_colored(string.format("  Selected Face: #%d", doc.selected_face_idx), 0.95, 0.7, 0.2, 1.0)
+                else
+                    ig.text_colored("  No face selected", 0.55, 0.55, 0.6, 1.0)
+                end
             end
         end
 
@@ -964,9 +1083,7 @@ function lp_frame()
         end)  -- sidebar_content child
     end)  -- sidebar window
 
-    -- File browser modal (on top of everything)
-    filebrowser.frame()
 end
 
 -- Global handle for drive assertions (CF.cam2d / CF.doc)
-CF = { cam = cam, cam2d = cam2d, doc = doc, sidebar = function() return sidebar_w end, import = import_image, browser = filebrowser }
+CF = { cam = cam, cam2d = cam2d, doc = doc, sidebar = function() return sidebar_w end, import = import_image }

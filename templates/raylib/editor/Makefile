@@ -70,7 +70,8 @@ WIN_OBJ_CXX := $(addprefix $(WIN_OBJ)/,$(notdir $(SRC:.cpp=.o)) \
                  $(IMGUI_CORE:.cpp=.o) rlImGui.o tinyfiledialogs.o winclip.o)
 WIN_OBJ_LUA := $(addprefix $(WIN_OBJ)/lua/,$(notdir $(LUA_C:.c=.o)))
 
-win: $(WIN_OUT)
+win: package
+
 $(WIN_OUT): $(WIN_OBJ_CXX) $(WIN_OBJ_LUA) | $(BUILD)
 	$(WIN_CXX) $(WIN_OBJ_CXX) $(WIN_OBJ_LUA) -o $(WIN_OUT) $(WIN_LDFLAGS) $(WIN_LIBS)
 	@echo "built $(WIN_OUT)"
@@ -80,7 +81,7 @@ $(WIN_OBJ)/%.o: src/%.cpp src/editor.h | $(WIN_OBJ)
 $(WIN_OBJ)/tinyfiledialogs.o: $(TINYFD_C) | $(WIN_OBJ)
 	$(WIN_CC) -O2 -std=gnu11 -I src/vendor/tinyfiledialogs -c $< -o $@
 $(WIN_OBJ)/winclip.o: src/winclip.c | $(WIN_OBJ)
-	$(WIN_CC) -O2 -std=c11 -c $< -o $@
+	$(WIN_CC) -O2 -std=c11 -DWINVER=0x0601 -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE -c $< -o $@
 $(WIN_OBJ)/%.o: $(IMGUI)/%.cpp | $(WIN_OBJ)
 	$(WIN_CXX) $(WIN_CXXFLAGS) -c $< -o $@
 $(WIN_OBJ)/%.o: $(IMGUI)/misc/cpp/%.cpp | $(WIN_OBJ)
@@ -91,7 +92,7 @@ $(WIN_OBJ)/lua/%.o: $(LUA)/src/%.c | $(WIN_OBJ)/lua
 	$(WIN_CC) -O2 -std=c11 -I $(LUA)/src -c $< -o $@
 
 # Standalone folder: exe + raylib DLL + glfw DLL + mcfgthread DLL + lua/ + tests/
-package: win
+package: $(WIN_OUT)
 	mkdir -p $(BUILD)/cubeforge-raylib-win64
 	rm -f $(BUILD)/cubeforge-raylib-win64/libraylib.dll $(BUILD)/cubeforge-raylib-win64/glfw3.dll $(BUILD)/cubeforge-raylib-win64/libmcfgthread-2.dll
 	cp $(WIN_OUT) $(BUILD)/cubeforge-raylib-win64/
@@ -157,8 +158,7 @@ test: linux
 
 # Windows: run the packaged exe from a Windows path (WSLInterop)
 win-run: package
-	cmd.exe /c "cd /d C:\\cubeforge-raylib && cubeforge-raylib.exe --test"
-
+	powershell.exe -Command "& '$$(wslpath -w $(abspath $(BUILD)/cubeforge-raylib-win64/cubeforge-raylib.exe))' --test"
 clean:
 	rm -rf $(OBJ) $(WIN_OBJ) $(OUT) $(WIN_OUT) $(BUILD)/cubeforge-raylib-win64
 
