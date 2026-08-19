@@ -1818,7 +1818,7 @@ static int l_tex_stamp(lua_State* L) {
             p[0] = (unsigned char)(r * af + p[0] * (1.0f - af));
             p[1] = (unsigned char)(g * af + p[1] * (1.0f - af));
             p[2] = (unsigned char)(b * af + p[2] * (1.0f - af));
-            p[3] = (unsigned char)(a * af + p[3] * (1.0f - af));
+            p[3] = 255; // Canvas remains fully opaque
         }
     }
     return 0;
@@ -2339,7 +2339,7 @@ float4 PSMain(PSInput input) : SV_TARGET {
     float diff = max(0.0f, dot(n, l));
     float3 lighting = u_ambient.xyz + u_sun_color.xyz * diff;
     float4 final_col = input.col * tex_col;
-    return float4(final_col.rgb * lighting, final_col.a);
+    return float4(final_col.rgb * lighting, 1.0f);
 }
 )HLSL";
 
@@ -2429,9 +2429,13 @@ static void app_init_d3d_pipeline() {
     rd.FillMode = D3D11_FILL_SOLID;
     rd.CullMode = D3D11_CULL_NONE;
     rd.DepthClipEnable = TRUE;
+    rd.AntialiasedLineEnable = TRUE;
+    rd.MultisampleEnable = FALSE;
     g_d3d_device->CreateRasterizerState(&rd, &g_raster_solid);
 
     rd.FillMode = D3D11_FILL_WIREFRAME;
+    rd.AntialiasedLineEnable = TRUE;
+    rd.MultisampleEnable = FALSE;
     g_d3d_device->CreateRasterizerState(&rd, &g_raster_wire);
 
     // Depth Stencil States
