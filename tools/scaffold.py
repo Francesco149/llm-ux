@@ -27,11 +27,15 @@ def main():
     name_title = "".join(w.capitalize() for w in name.replace("-", " ").replace("_", " ").split())
     desc = args.desc
 
-    template_dir = LLM_UX_ROOT / "templates" / "raylib"
-    if not template_dir.exists():
-        print(f"[!] Error: Template directory {template_dir} not found.")
+    candidate_dirs = [
+        Path(__file__).resolve().parent.parent / "templates" / "raylib",
+        Path("/opt/src/llm-ux/templates/raylib"),
+        Path(__file__).resolve().parent / "templates" / "raylib",
+    ]
+    template_dir = next((p for p in candidate_dirs if p.exists()), None)
+    if not template_dir:
+        print(f"[!] Error: Template directory not found in candidates: {candidate_dirs}")
         sys.exit(1)
-
     print(f"[*] Scaffolding native project '{name_title}' ({name_lower}) at {target_dir}...")
 
     # Copy template cleanly
@@ -49,7 +53,7 @@ def main():
     for root, _, files in os.walk(target_dir):
         for f in files:
             fp = Path(root) / f
-            if f.endswith((".nix", ".md", ".lua", ".cpp", ".h", "Makefile")):
+            if f.endswith((".nix", ".md", ".lua", ".cpp", ".h", "Makefile", ".yml", ".yaml")):
                 try:
                     text = fp.read_text(encoding="utf-8")
                     text = text.replace("cubeforge", name_lower)
