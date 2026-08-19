@@ -86,6 +86,21 @@ Through extensive empirical head-to-head stack evaluation (comparing raw C++/Ope
 | **Build & Toolchain** | **Hermetic Nix Flakes + MinGW-w64** | 100% reproducible native Linux builds and standalone portable Windows PE `.exe` cross-compilation with static GCC runtimes and bundled DLLs (`libraylib.dll`, `glfw3.dll`, `libmcfgthread-2.dll`). |
 | **Typography & Icons** | **Inter + IPA Gothic + FontAwesome 6** | Dual-range dynamic font stack (Latin/Cyrillic primary + merged CJK fallback) loaded at runtime, paired with an embedded binary FontAwesome 6 Solid atlas (`src/fa6/`) for zero runtime asset dependencies. |
 
+
+---
+
+## 🖥️ Officially Supported Platforms
+
+A core doctrine of `llm-ux` is that standalone binaries must run out of the box with zero runtime dependencies, missing DLLs, or OS upgrade barriers:
+
+| Platform | Support Status | Graphics Backend | Notes |
+|---|---|---|---|
+| **Linux x86_64** | **Tier 1 (Official)** | OpenGL 3.3 (GLX / EGL) | Native Wayland (Wayland-0, Niri, Weston, GNOME, KDE) and X11 / XWayland. Portable standalone directory + `.zip` packaging. |
+| **Windows 10 & 11 (64-bit)** | **Tier 1 (Official)** | OpenGL 3.3 (Win32 Subclass) | Hardware accelerated with continuous smooth modal drag-resize via in-app GLFW window subclassing (`cf_resize_subclass_proc`). |
+| **Windows 7 SP1 & 8.1 (64-bit)** | **Tier 1 (Official — Out of the Box)** | OpenGL 3.3 (`opengl32.dll`) | **Runs out of the box with zero runtime installers**. Compiled with `-DWINVER=0x0601 -D_WIN32_WINNT=0x0601` to prevent missing `CreateFile2` or modern entry-point crashes. Bundles MinGW runtime DLLs (`libraylib.dll`, `glfw3.dll`, `libmcfgthread-2.dll`). |
+| **WSL2 / WSLg** | **Tier 1 (Official)** | OpenGL 3.3 (D3D12 Gallium) | Full support for headless automated testing (`--test`), offscreen capture (`--shot`), input drive scripts (`--drive`), and interactive Wayland rendering. |
+| **Wine / Proton** | **Tier 1 (Official)** | OpenGL 3.3 / DXVK | Clean standalone PE execution under Wine 8.0+ and Steam Proton. |
+
 ---
 
 ## ⚡ Recommended Agentic Setup: Gemini 3.7 Flash on Oh My Pi (`omp`)
@@ -133,15 +148,56 @@ nix develop --command make -C editor package zip-win
 
 ## 🤖 How to Point Your Agents to This Setup
 
-To instruct autonomous agents (or custom prompt harnesses) to build native creation tools adhering to these standards, point them to the packaged skills and documentation:
+### 1. Recommended: Flake-Based Zero-Sync Integration (OMP + Home Manager)
 
-### 1. Mount Master LLM Skills
+The primary, zero-maintenance method to wire `llm-ux` into your agent workflow is declaring it as an input in your system or Home Manager flake:
+
+```nix
+# flake.nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager.url = "github:nix-community/home-manager";
+    omp-nix.url = "github:yuxqiu/omp-nix";
+    llm-ux.url = "github:Francesco149/llm-ux";
+  };
+
+  outputs = { self, nixpkgs, home-manager, omp-nix, llm-ux, ... }@inputs: {
+    # ...
+  };
+}
+```
+
+Then in your Home Manager module (e.g. `omp.nix`), automatically deploy the latest skills and system directives on activation:
+
+```nix
+# omp.nix
+{ pkgs, inputs, lib, ... }:
+{
+  home.packages = [
+    inputs.omp-nix.packages.${pkgs.stdenv.hostPlatform.system}.default
+  ];
+
+  # Declaratively mount the latest llm-ux skills directly from the flake input
+  home.activation.ompSkills = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    run mkdir -p "$HOME/.omp/agent/skills"
+    run cp -rf ${inputs.llm-ux}/skills/. "$HOME/.omp/agent/skills/"
+  '';
+}
+```
+
+Whenever you run `nix flake update llm-ux`, your agents immediately receive the latest recipes, UI physics rules, and scaffolding templates with **zero manual file copying or merge conflicts**.
+
+---
+
+### 2. Mount Master LLM Skills
+Agents equipped with Oh My Pi (`omp`) or custom MCP harnesses can read the packaged skills on demand:
 - **`skill://scaffold-native-app`**: Turnkey project generation, Nix flake configuration, directory layout, and headless test harnesses.
-- **`skill://native-ui-ux`**: Interaction physics doctrine, 60 FPS locked frame pacing, cursor-anchored zoom math, deadzones, and undo coalescing.
+- **`skill://native-ui-ux`**: Interaction physics doctrine, 60 FPS locked frame pacing, cursor-anchored zoom math, deadzones, multi-selection, and undo coalescing.
 - **`skill://imgui-recipes`**: Production recipes for 2D infinite canvases, 3D viewports, in-window Godot-style splitters, floating pill toolbars, layer stacks, color pickers, and context menus.
 
-### 2. System Directive Hook (`APPEND_SYSTEM.md`)
-Add the following directive to your agent harness configuration:
+### 3. System Directive Hook (`APPEND_SYSTEM.md`)
+Add the following directive to your agent harness configuration (e.g. `~/.omp/agent/APPEND_SYSTEM.md`):
 ```markdown
 When designing or implementing native desktop creation tools:
 1. Always base new projects on the Raylib 6.0 + ImGui 1.92 + Lua 5.4 template (`templates/raylib` or `skill://scaffold-native-app`).
