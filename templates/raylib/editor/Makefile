@@ -159,6 +159,19 @@ package-d3d11: $(WIN_D3D11_OUT)
 	cp $(FONT_CJK) $(BUILD)/cubeforge-d3d11-win64/assets/fonts/ipag.ttf
 	@echo "packaged $(BUILD)/cubeforge-d3d11-win64/"
 
+# Standalone Linux package: binary + lua/ + tests/ + assets/fonts/
+package-linux: $(OUT)
+	mkdir -p $(BUILD)/cubeforge-raylib-linux
+	cp $(OUT) $(BUILD)/cubeforge-raylib-linux/
+	rm -rf $(BUILD)/cubeforge-raylib-linux/lua $(BUILD)/cubeforge-raylib-linux/tests $(BUILD)/cubeforge-raylib-linux/assets
+	cp -r ../editor/lua $(BUILD)/cubeforge-raylib-linux/lua
+	cp -r ../editor/tests $(BUILD)/cubeforge-raylib-linux/tests
+	mkdir -p $(BUILD)/cubeforge-raylib-linux/assets/fonts
+	cp $(FONT_LATIN) $(BUILD)/cubeforge-raylib-linux/assets/fonts/InterVariable.ttf
+	cp $(FONT_CJK) $(BUILD)/cubeforge-raylib-linux/assets/fonts/ipag.ttf
+	@echo "packaged $(BUILD)/cubeforge-raylib-linux/"
+
+
 $(WIN_D3D11_OBJ):
 	mkdir -p $(WIN_D3D11_OBJ)
 $(WIN_D3D11_OBJ)/lua:
@@ -223,4 +236,4 @@ win-run-d3d11: package-d3d11
 clean:
 	rm -rf $(OBJ) $(WIN_OBJ) $(WIN_D3D11_OBJ) $(OUT) $(WIN_OUT) $(WIN_D3D11_OUT) $(BUILD)/cubeforge-raylib-win64 $(BUILD)/cubeforge-d3d11-win64
 
-.PHONY: linux win win-d3d11 package package-d3d11 clean run shot shot-drive shot-pan shot-paint shot-import shot-resize shot-browser shot-win-resize test win-run win-run-d3d11
+.PHONY: linux win win-d3d11 package package-d3d11 package-linux clean run shot shot-drive shot-pan shot-paint shot-import shot-resize shot-browser shot-win-resize test win-run win-run-d3d11
