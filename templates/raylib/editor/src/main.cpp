@@ -12,7 +12,6 @@ extern "C" const char* win_clipboard_file_path(void);
 extern "C" const char* win_clipboard_text(void);
 extern "C" const char* win_open_file_dialog(void);
 extern "C" void win_get_workarea(int* out_w, int* out_h);
-extern "C" void win_install_resize_hook(void);
 #endif
 
 #include "raylib.h"
@@ -1302,6 +1301,9 @@ static void rl_register(lua_State* L) {
     RK("0", KEY_ZERO); RK("1", KEY_ONE); RK("2", KEY_TWO); RK("3", KEY_THREE);
     RK("4", KEY_FOUR); RK("5", KEY_FIVE); RK("6", KEY_SIX); RK("7", KEY_SEVEN);
     RK("8", KEY_EIGHT); RK("9", KEY_NINE);
+    RK("F1", KEY_F1); RK("F2", KEY_F2); RK("F3", KEY_F3); RK("F4", KEY_F4);
+    RK("F5", KEY_F5); RK("F6", KEY_F6); RK("F7", KEY_F7); RK("F8", KEY_F8);
+    RK("F9", KEY_F9); RK("F10", KEY_F10); RK("F11", KEY_F11); RK("F12", KEY_F12);
     RK("Space", KEY_SPACE); RK("Enter", KEY_ENTER); RK("Escape", KEY_ESCAPE);
     RK("Tab", KEY_TAB); RK("Backspace", KEY_BACKSPACE); RK("Delete", KEY_DELETE);
     RK("LeftShift", KEY_LEFT_SHIFT); RK("RightShift", KEY_RIGHT_SHIFT);
@@ -1436,6 +1438,11 @@ void lua_init(const char* root_dir) {
     lua_setfield(L_global, -2, "log");
     lua_pushcfunction(L_global, l_app_open_file_dialog);
     lua_setfield(L_global, -2, "open_file_dialog");
+    lua_pushcfunction(L_global, [](lua_State* L) -> int {
+        lua_pushstring(L, "Raylib 6.0 (OpenGL 3.3)");
+        return 1;
+    });
+    lua_setfield(L_global, -2, "backend_name");
     lua_setfield(L_global, -2, "app");
     lua_setglobal(L_global, "lp");
 
@@ -1507,28 +1514,6 @@ static const char* font_path_env(const char* env, const char* fallback) {
     return fallback;
 }
 
-// ── Win32 live continuous resize callback ───────────────────────────────────
-static bool g_in_render = false;
-
-extern "C" void app_on_live_resize(void) {
-    if (!L_global || g_in_render) return;
-    g_in_render = true;
-    BeginDrawing();
-    ClearBackground({ 24, 24, 28, 255 });
-
-    BeginMode3D(g_camera);
-    lp_call_global("lp_draw3d");
-    EndMode3D();
-
-    lp_call_global("lp_draw2d");
-
-    rlImGuiBegin();
-    lua_frame();
-    rlImGuiEnd();
-    EndDrawing();
-
-    g_in_render = false;
-}
 
 static void resolve_font_path(char* out, size_t n, const char* env, const char* packaged_rel) {
     const char* p = font_path_env(env, nullptr);
@@ -1740,11 +1725,7 @@ int main(int argc, char** argv) {
 
     lua_init(root);
 
-#ifdef _WIN32
-    if (!headless) {
-        win_install_resize_hook();
-    }
-#endif
+
     bool drive_loaded = false;
     if (drive_script) {
         char dpath[2048];

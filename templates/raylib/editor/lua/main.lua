@@ -43,7 +43,8 @@ local cam2d = { pan = { 256, 256 }, zoom = 1.0 }
 
 -- Right sidebar width (resizable via the left-edge drag strip).
 local sidebar_w = 280
-
+local show_perf_hud = false
+local fps_smooth = 60.0
 local function sync_cam2d()
     lp.cam2d.set(cam2d.pan[1], cam2d.pan[2], cam2d.zoom)
 end
@@ -783,6 +784,11 @@ function lp_frame()
             doc.status_msg = "Paste: clipboard has no file or image path"
         end
     end
+    -- F3 Performance HUD toggle
+    if (rl.key.F3 and rl.is_key_pressed(rl.key.F3)) or (ig.key.F3 and ig.is_key_pressed(ig.key.F3)) then
+        show_perf_hud = not show_perf_hud
+    end
+
 
     -- 1. Top Floating Pill Toolbar (Centered over 3D viewport area)
     local max_sidebar = math.max(180, sw - 120)
@@ -1102,11 +1108,48 @@ function lp_frame()
         ig.text_colored("  Shift+MMB", 0.95, 0.7, 0.2, 1.0); ig.same_line(84); ig.text("3D Pan")
         ig.text_colored("  RMB", 0.95, 0.7, 0.2, 1.0); ig.same_line(84); ig.text("Fly (WASD/QE)")
         ig.text_colored("  Wheel", 0.95, 0.7, 0.2, 1.0); ig.same_line(84); ig.text("Zoom / Dolly")
-
+        ig.text_colored("  F3", 0.95, 0.7, 0.2, 1.0); ig.same_line(84); ig.text("Toggle Perf HUD")
         ig.separator()
         ig.text_colored(doc.status_msg or "", 0.7, 0.75, 0.8, 1.0)
         end)  -- sidebar_content child
     end)  -- sidebar window
+
+    -- 4. Performance Profiling Overlay (F3 toggle — Bottom-Left)
+    if show_perf_hud then
+        local dt = rl.get_frame_time()
+        local instant_fps = dt > 0.0001 and (1.0 / dt) or 60.0
+        fps_smooth = fps_smooth + (instant_fps - fps_smooth) * math.min(1.0, math.max(0.01, dt * 10.0))
+        local frame_ms = dt * 1000.0
+
+        local b_name = (lp.app and lp.app.backend_name and lp.app.backend_name()) or "OpenGL / D3D"
+        local m_count = #doc.meshes
+        local total_verts, total_faces = 0, 0
+        for _, m in ipairs(doc.meshes) do
+            total_verts = total_verts + #(m.verts or {})
+            total_faces = total_faces + #(m.faces or {})
+        end
+
+        ig.set_next_window_pos(12, sh - 114)
+        ig.set_next_window_size(300, 102)
+        ig.set_next_window_bg_alpha(0.88)
+        local hud_flags = 1 + 2 + 32 + 64 -- NoTitleBar | NoResize | NoSavedSettings | NoFocusOnAppearing
+        ig.window("##perf_hud", hud_flags, function()
+            ig.text_colored("PERF HUD [F3]", 0.96, 0.65, 0.12, 1.0)
+            ig.same_line()
+            local fps_col = (fps_smooth >= 55.0) and { 0.2, 0.9, 0.4 } or { 0.95, 0.4, 0.2 }
+            ig.text_colored(string.format("%.1f FPS (%.2f ms)", fps_smooth, frame_ms), fps_col[1], fps_col[2], fps_col[3], 1.0)
+            ig.separator()
+
+            ig.text_colored("Backend:", 0.55, 0.6, 0.65, 1.0)
+            ig.same_line()
+            ig.text_colored(b_name, 0.4, 0.8, 1.0, 1.0)
+
+            ig.text_colored(string.format("Res: %dx%d | Meshes: %d (%d v, %d f)", sw, sh, m_count, total_verts, total_faces), 0.75, 0.78, 0.82, 1.0)
+
+            local light_str = doc.lighting_enabled and "3D Sun Light" or "Unlit Diffuse"
+            ig.text_colored(string.format("Light: %s | Spacing: %.2f", light_str, doc.brush.spacing or 0.20), 0.65, 0.68, 0.72, 1.0)
+        end)
+    end
 
 end
 

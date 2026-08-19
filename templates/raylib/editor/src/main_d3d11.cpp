@@ -728,29 +728,52 @@ static int l_rl_draw_sphere_wires(lua_State* L) {
     float y = (float)luaL_checknumber(L, 2);
     float z = (float)luaL_checknumber(L, 3);
     float rad = (float)luaL_checknumber(L, 4);
-    int rings = (int)luaL_optinteger(L, 5, 8);
-    int slices = (int)luaL_optinteger(L, 6, 8);
+    int rings = (int)luaL_optinteger(L, 5, 12);
+    int slices = (int)luaL_optinteger(L, 6, 12);
     float r = (float)luaL_optinteger(L, 7, 255) / 255.0f;
     float g = (float)luaL_optinteger(L, 8, 200) / 255.0f;
     float b = (float)luaL_optinteger(L, 9, 0) / 255.0f;
     float a = (float)luaL_optinteger(L, 10, 255) / 255.0f;
 
+    if (rings < 2) rings = 2;
+    if (slices < 3) slices = 3;
+
     std::vector<D3DVertex> lines;
-    // 3 orthogonal circles
-    const int segs = 32;
-    for (int i = 0; i < segs; i++) {
-        float a1 = (i / (float)segs) * 6.2831853f;
-        float a2 = ((i + 1) / (float)segs) * 6.2831853f;
-        // XY ring
-        lines.push_back({ x + rad * std::cos(a1), y + rad * std::sin(a1), z, r, g, b, a, 0, 0, 0, 0, 0 });
-        lines.push_back({ x + rad * std::cos(a2), y + rad * std::sin(a2), z, r, g, b, a, 0, 0, 0, 0, 0 });
-        // XZ ring
-        lines.push_back({ x + rad * std::cos(a1), y, z + rad * std::sin(a1), r, g, b, a, 0, 0, 0, 0, 0 });
-        lines.push_back({ x + rad * std::cos(a2), y, z + rad * std::sin(a2), r, g, b, a, 0, 0, 0, 0, 0 });
-        // YZ ring
-        lines.push_back({ x, y + rad * std::cos(a1), z + rad * std::sin(a1), r, g, b, a, 0, 0, 0, 0, 0 });
-        lines.push_back({ x, y + rad * std::cos(a2), z + rad * std::sin(a2), r, g, b, a, 0, 0, 0, 0, 0 });
+    const float PI = 3.14159265358979323846f;
+
+    // 1. Latitude rings
+    for (int i = 1; i < rings; i++) {
+        float phi = (float)i * PI / (float)rings;
+        float ring_y = y + rad * std::cos(phi);
+        float ring_r = rad * std::sin(phi);
+
+        for (int j = 0; j < slices; j++) {
+            float t1 = (float)j * 2.0f * PI / (float)slices;
+            float t2 = (float)(j + 1) * 2.0f * PI / (float)slices;
+
+            lines.push_back({ x + ring_r * std::cos(t1), ring_y, z + ring_r * std::sin(t1), r, g, b, a, 0, 0, 0, 0, 0 });
+            lines.push_back({ x + ring_r * std::cos(t2), ring_y, z + ring_r * std::sin(t2), r, g, b, a, 0, 0, 0, 0, 0 });
+        }
     }
+
+    // 2. Longitude meridians
+    for (int j = 0; j < slices; j++) {
+        float theta = (float)j * 2.0f * PI / (float)slices;
+        float cos_t = std::cos(theta);
+        float sin_t = std::sin(theta);
+
+        for (int i = 0; i < rings; i++) {
+            float p1 = (float)i * PI / (float)rings;
+            float p2 = (float)(i + 1) * PI / (float)rings;
+
+            Vec3 v1 = { x + rad * std::sin(p1) * cos_t, y + rad * std::cos(p1), z + rad * std::sin(p1) * sin_t };
+            Vec3 v2 = { x + rad * std::sin(p2) * cos_t, y + rad * std::cos(p2), z + rad * std::sin(p2) * sin_t };
+
+            lines.push_back({ v1.x, v1.y, v1.z, r, g, b, a, 0, 0, 0, 0, 0 });
+            lines.push_back({ v2.x, v2.y, v2.z, r, g, b, a, 0, 0, 0, 0, 0 });
+        }
+    }
+
     draw_dynamic_lines(lines.data(), lines.size());
     return 0;
 }
@@ -1765,6 +1788,9 @@ static void rl_register(lua_State* L) {
     RK("5", '5'); RK("6", '6'); RK("7", '7'); RK("8", '8'); RK("9", '9');
     RK("Zero", '0'); RK("One", '1'); RK("Two", '2'); RK("Three", '3'); RK("Four", '4');
     RK("Five", '5'); RK("Six", '6'); RK("Seven", '7'); RK("Eight", '8'); RK("Nine", '9');
+    RK("F1", VK_F1); RK("F2", VK_F2); RK("F3", VK_F3); RK("F4", VK_F4);
+    RK("F5", VK_F5); RK("F6", VK_F6); RK("F7", VK_F7); RK("F8", VK_F8);
+    RK("F9", VK_F9); RK("F10", VK_F10); RK("F11", VK_F11); RK("F12", VK_F12);
     RK("Escape", VK_ESCAPE); RK("Space", VK_SPACE); RK("Enter", VK_RETURN);
     RK("LeftControl", VK_LCONTROL); RK("RightControl", VK_RCONTROL);
     RK("LeftShift", VK_LSHIFT); RK("RightShift", VK_RSHIFT);
@@ -2210,6 +2236,11 @@ void lua_init(const char* root_dir) {
     });
     lua_setfield(L_global, -2, "open_file_dialog");
     lua_setfield(L_global, -2, "app");
+    lua_pushcfunction(L_global, [](lua_State* L) -> int {
+        lua_pushstring(L, "Direct3D 11 (DXGI Flip Model)");
+        return 1;
+    });
+    lua_setfield(L_global, -2, "backend_name");
     lua_setglobal(L_global, "lp");
 
     ig_register(L_global);
