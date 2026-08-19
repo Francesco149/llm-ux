@@ -108,13 +108,12 @@ evaluation. `--mode json` exposes model identity + usage for verification.
    - **Stack A (OpenGL 3.3)**: all gates passed but **+368 C++ lines** for 5 GPU features; deleted.
    - **Stack B (Raylib)**: all gates passed with **+89 C++ lines** of thin wrappers; became the template.
    - **VERDICT: Raylib wins (4.9 vs 4.4 weighted)** — 4× less C++ work for identical 3D features, 30% faster completion. Gemini stays in Lua.
-2. **Single Backend + Windows Continuous Resize (2026-08-19, FINAL)**:
-   - OpenGL 3.3 (raylib) is THE backend on every platform. Smooth live
+2. **Single Backend + Windows Continuous Resize (2026-08-19, COMPLETE)**:
+   - OpenGL 3.3 (raylib 6.0) is THE single backend on every platform. Smooth live
      redraw during Windows drag-resize is achieved in-app via a Win32 window
-     subclass (`cf_resize_subclass_proc` in `editor/src/main.cpp`) — no
-     D3D11 needed. Verified Win11 + Win7.
-   - The separate D3D11 engine is OBSOLETE and slated for removal
-     (`TODO_D3D11_REMOVAL.md`). Do not build on it.
+     subclass (`cf_resize_subclass_proc` in `editor/src/main.cpp`) — maximum code
+     sharing with zero D3D11 duplication. Verified Win11 + Win7.
+   - The standalone D3D11 backend has been completely removed.
    - Frame contract: one draw pass (`render_frame_contents`) + one input
      poll per frame; own monotonic dt (`g_own_dt`) feeds `rl.get_frame_time`
      and `rlImGuiBeginDelta` (raylib's `GetFrameTime` freezes without

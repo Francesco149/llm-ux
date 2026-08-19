@@ -1,5 +1,22 @@
 // main.cpp — cubeforge-raylib entry point
 // Raylib for windowing + 3D, rlImGui for ImGui overlay, Lua for all logic
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// CRITICAL ARCHITECTURE NOTE FOR C++ EDITING / MAIN LOOP CHANGES:
+// Windows OpenGL 3.3 uses an in-loop Win32 window subclass (cf_resize_subclass_proc)
+// to provide smooth continuous rendering during modal drag-resizing.
+//
+// BEFORE modifying render_frame_contents(), present_no_poll(), cf_resize_subclass_proc(),
+// or the main loop, MUST read: docs/WINDOWS_OPENGL_RESIZE.md
+//
+// Key Invariants:
+// 1. NEVER call EndDrawing() or glfwPollEvents() re-entrantly from wndproc.
+// 2. Always CallWindowProcW(g_orig_proc) FIRST on WM_SIZE before re-rendering.
+// 3. Maintain single-thread re-entrancy latch (g_in_subclass_render).
+// 4. Time delta trap: raylib GetFrameTime() freezes on Windows because EndDrawing()
+//    is skipped; use g_own_dt / update_own_dt() / rlImGuiBeginDelta(g_own_dt).
+// 5. Exactly ONE input poll per frame (PollInputEvents on Win, EndDrawing on Linux).
+// ─────────────────────────────────────────────────────────────────────────────
 #include "editor.h"
 #include "app_paths.h"
 #include "editor_theme.h"

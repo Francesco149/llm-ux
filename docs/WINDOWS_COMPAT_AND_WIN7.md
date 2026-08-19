@@ -15,43 +15,52 @@ WIN_CXXFLAGS := -std=c++17 -O2 -DWINVER=0x0601 -D_WIN32_WINNT=0x0601 -DUNICODE -
 
 ---
 
-## 2. The SDL3 + `SDL_Renderer` Solution (Eliminating OpenGL/WGL Pitfalls)
+## 2. The Raylib 6.0 + OpenGL 3.3 Solution (Smooth Windows Resize)
 
-When cross-compiling for Windows with MinGW, requesting raw OpenGL via `SDL_WINDOW_OPENGL` fails with:
-`Failed to create window: SDL not configured with OpenGL/WGL support.`
+Raylib 6.0 cross-compiles cleanly with MinGW against standard Windows OpenGL (`opengl32.dll`).
 
-### Why SDL_Renderer Succeeds
-`SDL_CreateRenderer(window, nullptr)` automatically queries and selects:
-1. **Direct3D 11 (`d3d11`)** on Windows (universal hardware acceleration on Win7+).
-2. **Vulkan / OpenGL** on Linux.
+### Smooth Continuous Resize via Win32 Subclass
+On Windows, `DefWindowProc` runs a modal loop during window drag-resize that starves the main loop, causing DWM to stretch the stale backbuffer.
 
-Pairing `SDL_Renderer` with `imgui_impl_sdlrenderer3.h` provides:
-- Crisp vector and dynamic font rasterization.
-- Sub-pixel drawing precision.
-- Zero manual WGL/EGL context management.
+Rather than maintaining a secondary Direct3D 11 backend, the template subclasses the GLFW window in `src/main.cpp` (`cf_resize_subclass_proc`):
+1. Intercepts `WM_SIZE` while inside `WM_ENTERSIZEMOVE` modal drag.
+2. Calls original GLFW window procedure first (`CallWindowProcW`) so viewport state updates.
+3. Calls `render_frame_contents()` and presents with `present_no_poll()` (flushing batch + `SwapBuffers`, strictly avoiding re-entrant event polling).
+4. Feeds delta time via `g_own_dt` / `rlImGuiBeginDelta` so time-scaled inputs never freeze.
+
+> See **`docs/WINDOWS_OPENGL_RESIZE.md`** for complete crash-safety rules, the no-nested-poll rule, and the `GetFrameTime()` dt trap.
 
 ---
 
 ## 3. Static Runtime & Portable Packaging
 
-MinGW binaries often depend on `libgcc_s_seh-1.dll`, `libstdc++-6.dll`, and `libmcfgthread-2.dll`.
+MinGW binaries statically link GCC runtime where possible and bundle necessary dynamic dependencies (`libraylib.dll`, `glfw3.dll`, `libmcfgthread-2.dll`).
 
 ### Linker Flags
 ```makefile
-WIN_LDFLAGS := -static-libgcc -static-libstdc++ -mconsole
-WIN_LIBS := -L$(SDL3_CROSS_LIB) -lSDL3 -Wl,-Bstatic -lmcfgthread -Wl,-Bdynamic \
-  -lgdi32 -limm32 -lole32 -loleaut32 -lversion -lwinmm -luuid -ldxgi -ld3d11 \
-  -lsetupapi -lcomdlg32 -lshell32 -luser32 -lkernel32
+WIN_LDFLAGS := -static-libgcc -static-libstdc++
+WIN_LIBS := -L$(RAYLIB_CROSS_LIB) -lraylib \
+  -lopengl32 -lgdi32 -lwinmm -luser32 -lshell32 -lcomdlg32 \
+  -Wl,-Bstatic -lmcfgthread -Wl,-Bdynamic \
+  -ldwmapi -lole32 -lsetupapi
 ```
 
 ### Standalone Distribution Folder Structure
 ```
 my-tool-win64/
 ├── my-tool.exe
-├── SDL3.dll
+├── libraylib.dll
+├── glfw3.dll
 ├── libmcfgthread-2.dll
-└── lua/
-    ├── main.lua
+├── assets/
+│   └── fonts/
+│       ├── InterVariable.ttf
+│       └── ipag.ttf
+├── lua/
+│   ├── main.lua
+│   └── ...
+└── tests/
+    ├── testmain.lua
     └── ...
 ```
 Runs immediately on any Windows machine from Windows 7 SP1 to Windows 11 64-bit without installation.

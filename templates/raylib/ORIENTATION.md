@@ -38,15 +38,13 @@ document state are embedded Lua 5.4.
 nix develop
 make -C editor linux          # → build/cubeforge-raylib (Linux OpenGL 3.3)
 make -C editor win            # → build/cubeforge-raylib.exe (Windows OpenGL 3.3)
-make -C editor win-d3d11      # → build/cubeforge-d3d11.exe (Windows Direct3D 11 DXGI Flip Model)
 
 # Standalone directory packages (binary + lua/ + tests/ + assets/fonts/)
 make -C editor package-linux  # → build/cubeforge-raylib-linux/
 make -C editor package        # → build/cubeforge-raylib-win64/
-make -C editor package-d3d11  # → build/cubeforge-d3d11-win64/
 
 # Standalone ZIP archives
-make -C editor zip-all        # → build/cubeforge-raylib-linux.zip, cubeforge-raylib-win64.zip, cubeforge-d3d11-win64.zip
+make -C editor zip-all        # → build/cubeforge-raylib-linux.zip, cubeforge-raylib-win64.zip
 
 # Primary Nix package derivation
 nix build                     # → result/bin/cubeforge + result/share/cubeforge/
