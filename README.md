@@ -30,8 +30,7 @@ The core ambition is simple: **provide a dramatically better default than the ty
 <!-- ================================================================= -->
 <div align="center">
   <p><em>Demo Application: <strong>CubeForge</strong> — 3D Block Modeler & 2D Texture Paint Studio</em></p>
-  <p><em>(Replace this block with your video / GIF showcase embed)</em></p>
-  <!-- <video src="https://github.com/Francesco149/llm-ux/assets/demo.mp4" controls="controls" width="800"></video> -->
+  <video src="https://github.com/user-attachments/assets/c1130955-75d3-4317-b181-7999ac675af5" controls="controls" width="800"></video>
 </div>
 <!-- ================================================================= -->
 
