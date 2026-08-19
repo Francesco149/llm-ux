@@ -27,7 +27,8 @@
 #include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
-
+#define STB_PERLIN_IMPLEMENTATION
+#include "stb_perlin.h"
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
@@ -1124,14 +1125,15 @@ static int l_rl_set_material_texture(lua_State* L) {
 static int l_rl_load_texture_perlin(lua_State* L) {
     int w = (int)luaL_checkinteger(L, 1);
     int h = (int)luaL_checkinteger(L, 2);
-    float scale = (float)luaL_optnumber(L, 3, 10.0);
+    float scale = (float)luaL_optnumber(L, 3, 5.0);
 
     std::vector<uint32_t> pixels(w * h);
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
-            float fx = (x / (float)w) * scale;
-            float fy = (y / (float)h) * scale;
-            float val = (std::sin(fx) * std::cos(fy) + 1.0f) * 0.5f;
+            float nx = (x / (float)w) * scale;
+            float ny = (y / (float)h) * scale;
+            float n = stb_perlin_fbm_noise3(nx, ny, 0.5f, 2.0f, 0.5f, 6);
+            float val = std::max(0.0f, std::min(1.0f, (n + 1.0f) * 0.5f));
             uint8_t c = (uint8_t)(val * 255.0f);
             pixels[y * w + x] = (0xFF << 24) | (c << 16) | (c << 8) | c;
         }
@@ -1168,6 +1170,53 @@ static int l_rl_unload_texture(lua_State* L) {
     }
     return 0;
 }
+// ── CanvasTex Structure & Globals ──────────────────────────────────────────
+struct CanvasTex {
+    int width = 0;
+    int height = 0;
+    std::vector<unsigned char> data;
+    int d3d_tex_id = -1;
+    std::vector<std::vector<unsigned char>> undo_stack;
+    std::vector<std::vector<unsigned char>> redo_stack;
+};
+static std::vector<CanvasTex> g_canvas;
+
+static CanvasTex* canvas_check(lua_State* L, int arg) {
+    int id = (int)luaL_checkinteger(L, arg);
+    if (id < 0 || id >= (int)g_canvas.size()) {
+        luaL_error(L, "canvas id %d out of range (count=%d)", id, (int)g_canvas.size());
+        return nullptr;
+    }
+    return &g_canvas[id];
+}
+
+static int l_tex_upload(lua_State* L) {
+    CanvasTex* ct = canvas_check(L, 1);
+    if (!ct || !g_d3d_device) return 0;
+
+    if (ct->d3d_tex_id <= 0) {
+        D3D11_TEXTURE2D_DESC desc = {};
+        desc.Width = ct->width;
+        desc.Height = ct->height;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+        D3D11_SUBRESOURCE_DATA data = { ct->data.data(), (UINT)(ct->width * 4), 0 };
+        ID3D11Texture2D* tex = nullptr;
+        ID3D11ShaderResourceView* srv = nullptr;
+        g_d3d_device->CreateTexture2D(&desc, &data, &tex);
+        g_d3d_device->CreateShaderResourceView(tex, nullptr, &srv);
+        ct->d3d_tex_id = register_texture(tex, srv, ct->width, ct->height);
+    } else {
+        D3DTexture& t = g_textures[ct->d3d_tex_id - 1];
+        g_d3d_context->UpdateSubresource(t.tex, 0, nullptr, ct->data.data(), ct->width * 4, 0);
+    }
+    return 0;
+}
 
 // ── 2D Canvas Viewport Bindings ─────────────────────────────────────────────
 static int l_rl_begin_mode2d(lua_State* L) {
@@ -1180,13 +1229,26 @@ static int l_rl_end_mode2d(lua_State* L) {
     return 0;
 }
 static int l_rl_draw_texture(lua_State* L) {
-    int tex_id = (int)luaL_checkinteger(L, 1);
+    int id = (int)luaL_checkinteger(L, 1);
     float x = (float)luaL_checknumber(L, 2);
     float y = (float)luaL_checknumber(L, 3);
     float w = (float)luaL_checknumber(L, 4);
     float h = (float)luaL_checknumber(L, 5);
 
-    if (tex_id <= 0 || tex_id > (int)g_textures.size()) return 0;
+    int d3d_id = -1;
+    if (id >= 0 && id < (int)g_canvas.size()) {
+        CanvasTex& c = g_canvas[id];
+        if (c.d3d_tex_id <= 0) {
+            lua_pushinteger(L, id);
+            l_tex_upload(L);
+            lua_pop(L, 1);
+        }
+        d3d_id = c.d3d_tex_id;
+    } else if (id > 0 && id <= (int)g_textures.size()) {
+        d3d_id = id;
+    }
+
+    if (d3d_id <= 0 || d3d_id > (int)g_textures.size()) return 0;
 
     float sx0 = (x - g_cam2d.target.x) * g_cam2d.zoom + g_win_w * 0.5f;
     float sy0 = (y - g_cam2d.target.y) * g_cam2d.zoom + g_win_h * 0.5f;
@@ -1206,10 +1268,9 @@ static int l_rl_draw_texture(lua_State* L) {
         { ndc_x1, ndc_y1, 0.0f, 1,1,1,1, 0,0,-1, 1, 1 },
         { ndc_x0, ndc_y1, 0.0f, 1,1,1,1, 0,0,-1, 0, 1 },
     };
-    draw_dynamic_triangles_2d(quad, 6, tex_id);
+    draw_dynamic_triangles_2d(quad, 6, d3d_id);
     return 0;
 }
-
 static int l_rl_draw_rect_2d(lua_State* L) {
     float x = (float)luaL_checknumber(L, 1);
     float y = (float)luaL_checknumber(L, 2);
@@ -1558,7 +1619,29 @@ static int l_rl_load_model_cylinder(lua_State* L) {
 }
 static int l_rl_draw_cylinder(lua_State* L) { return 0; }
 static int l_rl_draw_cylinder_wires(lua_State* L) { return 0; }
-static int l_rl_draw_triangle_3d(lua_State* L) { return 0; }
+static int l_rl_draw_triangle_3d(lua_State* L) {
+    float x1 = (float)luaL_checknumber(L, 1);
+    float y1 = (float)luaL_checknumber(L, 2);
+    float z1 = (float)luaL_checknumber(L, 3);
+    float x2 = (float)luaL_checknumber(L, 4);
+    float y2 = (float)luaL_checknumber(L, 5);
+    float z2 = (float)luaL_checknumber(L, 6);
+    float x3 = (float)luaL_checknumber(L, 7);
+    float y3 = (float)luaL_checknumber(L, 8);
+    float z3 = (float)luaL_checknumber(L, 9);
+    float r = (float)luaL_optinteger(L, 10, 255) / 255.0f;
+    float g = (float)luaL_optinteger(L, 11, 255) / 255.0f;
+    float b = (float)luaL_optinteger(L, 12, 255) / 255.0f;
+    float a = (float)luaL_optinteger(L, 13, 255) / 255.0f;
+
+    D3DVertex v[3] = {
+        { x1, y1, z1, r, g, b, a, 0, 1, 0, 0, 0 },
+        { x2, y2, z2, r, g, b, a, 0, 1, 0, 1, 0 },
+        { x3, y3, z3, r, g, b, a, 0, 1, 0, 0, 1 },
+    };
+    draw_dynamic_triangles_unlit(v, 3, v4(r, g, b, a));
+    return 0;
+}
 
 static int l_rl_load_shader(lua_State* L) { lua_pushinteger(L, 1); return 1; }
 static int l_rl_unload_shader(lua_State* L) { return 0; }
@@ -1686,25 +1769,7 @@ static void rl_register(lua_State* L) {
     lua_pop(L, 1);
 }
 
-// ── Texture & Canvas Lua Module (lp.tex.*) ───────────────────────────────────
-struct CanvasTex {
-    int width = 0;
-    int height = 0;
-    std::vector<unsigned char> data;
-    int d3d_tex_id = -1;
-    std::vector<std::vector<unsigned char>> undo_stack;
-    std::vector<std::vector<unsigned char>> redo_stack;
-};
-static std::vector<CanvasTex> g_canvas;
 
-static CanvasTex* canvas_check(lua_State* L, int arg) {
-    int id = (int)luaL_checkinteger(L, arg);
-    if (id < 0 || id >= (int)g_canvas.size()) {
-        luaL_error(L, "canvas id %d out of range (count=%d)", id, (int)g_canvas.size());
-        return nullptr;
-    }
-    return &g_canvas[id];
-}
 
 static int l_tex_create(lua_State* L) {
     int w = (int)luaL_checkinteger(L, 1);
@@ -1799,34 +1864,6 @@ static int l_tex_clear(lua_State* L) {
         px[i * 4 + 1] = g;
         px[i * 4 + 2] = b;
         px[i * 4 + 3] = a;
-    }
-    return 0;
-}
-
-static int l_tex_upload(lua_State* L) {
-    CanvasTex* ct = canvas_check(L, 1);
-    if (!ct || !g_d3d_device) return 0;
-
-    if (ct->d3d_tex_id <= 0) {
-        D3D11_TEXTURE2D_DESC desc = {};
-        desc.Width = ct->width;
-        desc.Height = ct->height;
-        desc.MipLevels = 1;
-        desc.ArraySize = 1;
-        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        desc.SampleDesc.Count = 1;
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-        D3D11_SUBRESOURCE_DATA data = { ct->data.data(), (UINT)(ct->width * 4), 0 };
-        ID3D11Texture2D* tex = nullptr;
-        ID3D11ShaderResourceView* srv = nullptr;
-        g_d3d_device->CreateTexture2D(&desc, &data, &tex);
-        g_d3d_device->CreateShaderResourceView(tex, nullptr, &srv);
-        ct->d3d_tex_id = register_texture(tex, srv, ct->width, ct->height);
-    } else {
-        D3DTexture& t = g_textures[ct->d3d_tex_id - 1];
-        g_d3d_context->UpdateSubresource(t.tex, 0, nullptr, ct->data.data(), ct->width * 4, 0);
     }
     return 0;
 }
