@@ -2775,9 +2775,13 @@ int main(int argc, char** argv) {
     sd.Windowed = TRUE;
     sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
     sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+ 
+    // NOTE: D3D_FEATURE_LEVEL_11_1 must NOT be requested on Windows 7 unless
+    // KB2670838 is installed — D3D11CreateDeviceAndSwapChain fails with
+    // E_INVALIDARG (0x80070057) for the WHOLE call if 11_1 is in the array
+    // and the runtime can't provide it. 11_0 is the max universal Win7 level.
 
     D3D_FEATURE_LEVEL featureLevels[] = {
-        D3D_FEATURE_LEVEL_11_1,
         D3D_FEATURE_LEVEL_11_0,
         D3D_FEATURE_LEVEL_10_1,
         D3D_FEATURE_LEVEL_10_0,
@@ -2786,14 +2790,25 @@ int main(int argc, char** argv) {
 
     HRESULT hr = D3D11CreateDeviceAndSwapChain(
         nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
-        featureLevels, 4, D3D11_SDK_VERSION, &sd,
+        featureLevels, 3, D3D11_SDK_VERSION, &sd,
         &g_swapchain, &g_d3d_device, &featureLevel, &g_d3d_context);
 
     if (FAILED(hr)) {
+        // FLIP swap effects need Win8+/KB2670838 — fall back to the classic
+        // BitBlt model (DISCARD) which is universal on Win7. (dokuro's proven path.)
         sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
         hr = D3D11CreateDeviceAndSwapChain(
             nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
-            featureLevels, 4, D3D11_SDK_VERSION, &sd,
+            featureLevels, 3, D3D11_SDK_VERSION, &sd,
+            &g_swapchain, &g_d3d_device, &featureLevel, &g_d3d_context);
+    }
+
+    if (FAILED(hr)) {
+        // WARP (software) fallback for VMs / GPUs without WDDM 1.1 drivers.
+        sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+        hr = D3D11CreateDeviceAndSwapChain(
+            nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0,
+            featureLevels, 3, D3D11_SDK_VERSION, &sd,
             &g_swapchain, &g_d3d_device, &featureLevel, &g_d3d_context);
     }
 

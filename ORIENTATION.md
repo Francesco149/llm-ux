@@ -22,9 +22,11 @@ The definitive framework, harness configuration, and skill repository for gettin
    - **Debounced 300ms Autosave** + backup rotation (`backup.1.json`, `backup.2.json`).
 5. **Windows 7+ Standalone Compatibility (Zero Footguns)**:
    - `-DWINVER=0x0601 -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE`.
-   - SDL3 + `SDL_Renderer` (D3D11 on Windows, Vulkan/OpenGL on Linux) to eliminate OpenGL/WGL initialization errors.
+   - Raylib 6.0 + OpenGL 3.3 on ALL platforms (Win7-verified); smooth Windows
+     drag-resize via the in-app Win32 subclass — never needed a second backend.
    - Static linking `-static -static-libgcc -static-libstdc++ -Wl,-Bstatic -lmcfgthread -Wl,-Bdynamic`.
-   - Standalone `make package` copies exe, `SDL3.dll`, runtime DLLs, and `lua/` into a portable folder.
+   - Standalone `make package` copies exe, `libraylib.dll`, `glfw3.dll`,
+     `libmcfgthread-2.dll`, and `lua/` into a portable folder.
 6. **Headless Verification & Smoke Test Gates**:
    - Offscreen screenshot capture (`--shot build/shot.png --frames 20`) for instant visual inspection via vision models.
    - Headless unit & invariant test suite (`--test`).
@@ -43,8 +45,7 @@ The definitive framework, harness configuration, and skill repository for gettin
   - `tools/embed.py` -> Font & asset C header embedder.
 - `docs/` -> Deep research & technical references:
   - `docs/DIRECT_MANIPULATION_AND_FEEL.md` -> HCI principles, Fitts's law, spring physics.
-  - `docs/WINDOWS_COMPAT_AND_WIN7.md` -> Cross-compilation, SDL_Renderer vs WGL, static runtimes.
-  - `docs/ZERO_DATA_LOSS_AND_UNDO.md` -> Undo coalescing, state journaling, crash resilience.
+  - `docs/WINDOWS_OPENGL_RESIZE.md` -> Why OGL content stretched during Windows drag-resize (modal loop), the subclass fix, the no-nested-poll crash rules, and the GetFrameTime/dt trap. REQUIRED READING before touching the main loop.
   - `docs/STACK_EVALUATION_PLAN.md` -> A-vs-B stack evaluation plan + template findings.
   - `docs/CUBEFORGE_SPEC.md` -> The CubeForge evaluation test-app spec.
   - `docs/IMGUI_WRAPPER_DESIGN.md` -> Scoped ImGui wrapper + balance-tracker design.
@@ -107,11 +108,17 @@ evaluation. `--mode json` exposes model identity + usage for verification.
    - **Stack A (OpenGL 3.3)**: all gates passed but **+368 C++ lines** for 5 GPU features; deleted.
    - **Stack B (Raylib)**: all gates passed with **+89 C++ lines** of thin wrappers; became the template.
    - **VERDICT: Raylib wins (4.9 vs 4.4 weighted)** — 4× less C++ work for identical 3D features, 30% faster completion. Gemini stays in Lua.
-2. **Triple Backend Support & Continuous Resize (2026-08-19)**:
-   - **Linux (OpenGL 3.3)**: Packaged as primary Nix derivation (`nix build`) and standalone portable directory (`make package-linux` / `make zip-linux`).
-   - **Windows (OpenGL 3.3)**: Packaged via MinGW cross (`make win` / `make package` / `make zip-win`), Win7+ compatible.
-   - **Windows (Direct3D 11 DXGI Flip Model)**: Dedicated D3D11 backend (`make win-d3d11` / `make package-d3d11` / `make zip-d3d11`), 100% continuous live redraw during sizing loops with zero stretching.
-   - All 3 builds share common C++ wrappers (`app_paths.cpp`, `editor_theme.h`, `ig.cpp`, `fa6/`) and identical Lua codebase.
+2. **Single Backend + Windows Continuous Resize (2026-08-19, FINAL)**:
+   - OpenGL 3.3 (raylib) is THE backend on every platform. Smooth live
+     redraw during Windows drag-resize is achieved in-app via a Win32 window
+     subclass (`cf_resize_subclass_proc` in `editor/src/main.cpp`) — no
+     D3D11 needed. Verified Win11 + Win7.
+   - The separate D3D11 engine is OBSOLETE and slated for removal
+     (`TODO_D3D11_REMOVAL.md`). Do not build on it.
+   - Frame contract: one draw pass (`render_frame_contents`) + one input
+     poll per frame; own monotonic dt (`g_own_dt`) feeds `rl.get_frame_time`
+     and `rlImGuiBeginDelta` (raylib's `GetFrameTime` freezes without
+     `EndDrawing`). Details: `docs/WINDOWS_OPENGL_RESIZE.md`.
 3. **Embedded FontAwesome 6 Icon System & UI Polish (2026-08-19)**:
    - Binary compressed FontAwesome 6 Solid TTF atlas embedded in binary with zero runtime font dependencies (`src/fa6/`).
    - Exposes `ig.icon.*` constants table to Lua across toolbars, selection mode pills, and sidebar actions.
