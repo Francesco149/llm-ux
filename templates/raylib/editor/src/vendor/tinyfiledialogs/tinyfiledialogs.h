@@ -112,6 +112,7 @@ extern char tinyfd_version[8]; /* contains tinyfd current version number */
 #ifdef _WIN32
 /* for UTF-16 use the functions at the end of this files */
 extern int tinyfd_winUtf8; /* 0 (default) or 1 */
+extern void *tinyfd_winOwner; /* optional owner HWND (Windows) — keeps the dialog above the app window */
 /* on windows string char can be 0:MBSC or 1:UTF-8
 unless your code is really prepared for UTF-8 on windows, leave this on MBSC.
 Or you can use the UTF-16 (wchar) prototypes at the end of ths file.*/

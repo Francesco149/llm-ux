@@ -10,6 +10,7 @@
 // raylib's Rectangle/ShowCursor/CloseWindow when included here).
 extern "C" const char* win_clipboard_file_path(void);
 extern "C" const char* win_clipboard_text(void);
+extern "C" void win_prepare_file_dialog(void);
 #endif
 
 #include "raylib.h"
@@ -583,6 +584,11 @@ static int l_rl_take_dropped_file(lua_State* L) {
 // lp.app.open_file_dialog() -> path or nil — native file picker (vendored
 // tinyfiledialogs; zenity/kdialog/portal on Linux, native dialogs on Windows).
 static int l_app_open_file_dialog(lua_State* L) {
+#ifdef _WIN32
+    // Own the dialog to our window so it appears above the app (ownerless
+    // dialogs can open behind and look like they never opened).
+    win_prepare_file_dialog();
+#endif
     const char* path = tinyfd_openFileDialog(
         "Open Texture (png/jpg/bmp/tga/gif/qoi)",
         ".",
@@ -1570,10 +1576,10 @@ int main(int argc, char** argv) {
     int frame = 0;
     bool running = true;
     while (running && !WindowShouldClose()) {
-        // Process OS events BEFORE this frame renders (raylib's EndDrawing
-        // also polls, but early polling applies resize/input events to the
-        // CURRENT frame — keeps window-resize handling as live as possible).
-        PollInputEvents();
+        // NOTE: do NOT call PollInputEvents() here. raylib's EndDrawing polls
+        // once per frame; a second early poll clears the pressed-queues that
+        // EndDrawing just filled → clicks landing mid-frame get dropped
+        // (intermittent unresponsiveness). One poll per frame is correct.
         // Drive step BEFORE input is read: executes this frame's plan + boundary
         if (drive_loaded) lp_call_global("drive_step");
 

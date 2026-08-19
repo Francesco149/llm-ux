@@ -814,9 +814,9 @@ function lp_frame()
 
         -- Selection Mode Pills (1..4 = 3D, 5 = 2D texture paint)
         ig.text("Selection Mode:")
-        local mode_names = { "1: Vertex", "2: Edge", "3: Face", "4: Paint", "5: Texture Paint" }
+        local mode_names = { "1: Vertex", "2: Edge", "3: Face", "4: Paint", "5: Tex Paint" }
         for m = 1, 5 do
-            if m > 1 and m < 5 then ig.same_line() end  -- pill 5 wraps to its own row
+            if m == 2 or m == 4 then ig.same_line() end  -- 2 per row
             local is_active = (doc.mode == m)
             if is_active then
                 ig.push_style_color(ig.col.Button, 0.85, 0.55, 0.12, 1.0)

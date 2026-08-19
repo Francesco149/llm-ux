@@ -216,15 +216,17 @@ canvas is untouched.
   edges flicker. Draw it slightly below (`GRID_Y = -0.02`) with manual lines.
 - **Resize handling**: cheap per-frame state (camera aspect, cam2d offset,
   viewport rect) MUST read the live window size every frame; heavy work on
-  resize MUST be debounced (~120 ms, `resize_settled()` helper). The main loop
-  calls `PollInputEvents()` BEFORE rendering so resize/input events apply to
-  the current frame (raylib also polls at EndDrawing). Evidence from raylib
-  6.0 source: `FramebufferSizeCallback` updates `CORE.Window.render` +
-  `currentFbo` + `SetupViewport` live; the 3D projection aspect comes from
-  `currentFbo` — so in-app rendering IS size-live. Any remaining stretch
-  during the drag is the platform drag loop blocking present (Windows GDI
-  modal resize / compositor), not an app-side size lag — do NOT try to force
-  the viewport (`rlViewport` overrides made it worse; reverted 2026-08-19).
+  resize MUST be debounced (~120 ms, `resize_settled()` helper). Evidence
+  from raylib 6.0 source: `FramebufferSizeCallback` updates
+  `CORE.Window.render` + `currentFbo` + `SetupViewport` live; the 3D
+  projection aspect comes from `currentFbo` — in-app rendering IS size-live,
+  and raylib polls events exactly once per frame at `EndDrawing`. **Never
+  add a second `PollInputEvents()`**: it clears the pressed-queues EndDrawing
+  just filled → clicks landing mid-frame get dropped (intermittent
+  unresponsiveness; tried, reverted 2026-08-19). Any remaining stretch during
+  the drag is the platform drag loop blocking present (Windows GDI modal
+  resize / compositor) — do NOT force the viewport (`rlViewport` overrides
+  made it worse; also reverted).
 - **Hover affordances**: every draggable region shows a cursor change
   (`lp.rl.set_mouse_cursor`) + a visual highlight. ALWAYS reset the cursor
   (`CURSOR_DEFAULT`) when the pointer leaves the region — a stuck resize

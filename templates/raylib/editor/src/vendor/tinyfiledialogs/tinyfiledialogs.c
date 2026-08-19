@@ -111,6 +111,7 @@ misrepresented as being the original software.
  /*#include <io.h>*/
  #define SLASH "\\"
  int tinyfd_winUtf8 = 0 ; /* on windows string char can be 0:MBSC or 1:UTF-8 */
+ void * tinyfd_winOwner = 0 ; /* optional owner HWND so the dialog stays above the app */
 #else
  #include <limits.h>
  #include <unistd.h>
@@ -1165,7 +1166,7 @@ wchar_t const * tinyfd_saveFileDialogW(
 	}
 
 	ofn.lStructSize = sizeof(OPENFILENAMEW);
-	ofn.hwndOwner = 0;
+	ofn.hwndOwner = (HWND)tinyfd_winOwner;
 	ofn.hInstance = 0;
 	ofn.lpstrFilter = lFilterPatterns && wcslen(lFilterPatterns) ? lFilterPatterns : NULL;
 	ofn.lpstrCustomFilter = NULL;
@@ -1314,7 +1315,7 @@ wchar_t const * tinyfd_openFileDialogW(
 	}
 
 	ofn.lStructSize = sizeof(OPENFILENAME);
-	ofn.hwndOwner = 0;
+	ofn.hwndOwner = (HWND)tinyfd_winOwner;
 	ofn.hInstance = 0;
 	ofn.lpstrFilter = lFilterPatterns && wcslen(lFilterPatterns) ? lFilterPatterns : NULL;
 	ofn.lpstrCustomFilter = NULL;
@@ -1773,7 +1774,7 @@ static char const * saveFileDialogWinGuiA (
 	}
 
 	ofn.lStructSize     = sizeof(OPENFILENAME) ;
-	ofn.hwndOwner       = 0 ;
+	ofn.hwndOwner       = (HWND)tinyfd_winOwner ;
 	ofn.hInstance       = 0 ;
 	ofn.lpstrFilter		= lFilterPatterns && strlen(lFilterPatterns) ? lFilterPatterns : NULL;
 	ofn.lpstrCustomFilter = NULL ;
@@ -1866,7 +1867,7 @@ static char const * openFileDialogWinGuiA (
 	}
 
 	ofn.lStructSize     = sizeof ( OPENFILENAME ) ;
-	ofn.hwndOwner       = 0 ;
+	ofn.hwndOwner       = (HWND)tinyfd_winOwner ;
 	ofn.hInstance       = 0 ;
 	ofn.lpstrFilter		= lFilterPatterns && strlen(lFilterPatterns) ? lFilterPatterns : NULL;
 	ofn.lpstrCustomFilter = NULL ;

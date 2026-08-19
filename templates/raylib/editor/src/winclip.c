@@ -6,6 +6,11 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <wchar.h>
+#include "vendor/tinyfiledialogs/tinyfiledialogs.h"  // tinyfd_winOwner
+
+// raylib's GetWindowHandle (GLFWwindow*) — declared manually because
+// including raylib.h here clashes with windows.h (Rectangle/ShowCursor...).
+extern void *GetWindowHandle(void);
 
 // Returns the first file path from the clipboard (CF_HDROP, i.e. files copied
 // in Explorer), UTF-8 encoded, or NULL when the clipboard holds no files.
@@ -60,6 +65,27 @@ const char* win_clipboard_text(void) {
     GlobalUnlock(h);
     CloseClipboard();
     return (out[0] != '\0') ? out : NULL;
+}
+
+// Resolve the app's Win32 HWND from GLFW at runtime (raylib links glfw3.dll
+// internally; we cannot link it directly, so use GetProcAddress), make the
+// window foreground, and hand the HWND to tinyfiledialogs as the dialog
+// OWNER. Without an owner the native file dialog can appear behind the app
+// window and look like it never opened.
+void win_prepare_file_dialog(void) {
+    typedef HWND (*GlfwGetWin32WindowFn)(void*);
+    HMODULE glfw = GetModuleHandleA("glfw3.dll");
+    static GlfwGetWin32WindowFn glfwGetWin32Window = NULL;
+    if (glfw && !glfwGetWin32Window)
+        glfwGetWin32Window = (GlfwGetWin32WindowFn)GetProcAddress(glfw, "glfwGetWin32Window");
+    void* glfwWindow = GetWindowHandle();  // raylib: GLFWwindow*
+    if (glfwWindow && glfwGetWin32Window) {
+        HWND hwnd = glfwGetWin32Window(glfwWindow);
+        if (hwnd) {
+            tinyfd_winOwner = hwnd;
+            SetForegroundWindow(hwnd);
+        }
+    }
 }
 
 #endif // _WIN32
