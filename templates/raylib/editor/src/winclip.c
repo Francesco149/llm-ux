@@ -30,11 +30,13 @@ static void resolve_glfw(void) {
 }
 // Resolve HWND from GLFW window handle.
 static HWND get_app_hwnd(void) {
-    resolve_glfw();
     void *gw = GetWindowHandle();
-    if (gw && pfn_glfwGetWin32Window)
-        return pfn_glfwGetWin32Window(gw);
-    return NULL;
+    if (gw) {
+        resolve_glfw();
+        if (pfn_glfwGetWin32Window)
+            return pfn_glfwGetWin32Window(gw);
+    }
+    return GetActiveWindow();
 }
 
 // ── Clipboard ───────────────────────────────────────────────────────────────

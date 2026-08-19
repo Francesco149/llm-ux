@@ -49,6 +49,7 @@
             xorg.libXi
             inter
             ipafont
+            stb
           ];
 
           shellHook = ''
@@ -59,6 +60,7 @@
             export RAYLIB_LIB=${pkgs.raylib}/lib
             export FONT_LATIN=${pkgs.inter}/share/fonts/truetype/InterVariable.ttf
             export FONT_CJK=${pkgs.ipafont}/share/fonts/truetype/ipag.ttf
+            export STB_INC=${pkgs.stb}/include/stb
 
             # Windows cross: raylib import lib + runtime DLL from pkgsCross
             export RAYLIB_CROSS_INC=${mingwPkgs.raylib}/include
