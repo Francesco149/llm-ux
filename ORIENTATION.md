@@ -28,23 +28,26 @@ The definitive framework, harness configuration, and skill repository for gettin
 6. **Headless Verification & Smoke Test Gates**:
    - Offscreen screenshot capture (`--shot build/shot.png --frames 20`) for instant visual inspection via vision models.
    - Headless unit & invariant test suite (`--test`).
+   - **Headless input drive (`lp.drive.*` + `--drive script.lua`)**: frame-accurate input injection with NO window focus, NO xdotool, NO synthetic OS events. C++ virtual-input override; Lua tape schedules clicks/drags/keys per frame; `drive_step()` before render + `drive_frame()` after. Every template MUST prefer this over window-focus tooling.
 
 ## Repository Map
 - `skills/` -> Master LLM skill packs:
   - `skills/native-ui-ux/` -> Master UI/UX & Interaction Physics Doctrine.
   - `skills/scaffold-native-app/` -> Turnkey project generator blueprint.
   - `skills/imgui-recipes/` -> Production-tested C++ & Lua UI recipes.
-- `templates/` -> Ready-to-use starter repositories:
-  - `templates/2d-canvas/` -> 2D infinite canvas / image / texture creation tool.
-  - `templates/3d-viewport/` -> 3D CSG blockout / low-poly modeling & painting tool.
+- `templates/` -> Ready-to-use starter repositories (ONE raylib template — 2D is a subset of 3D, per the evaluation verdict):
+  - `templates/raylib/` -> The template: Raylib 6.0 + rlImGui + Lua. 3D (models/textures/RLSL shaders/lighting, Godot-editor camera) AND 2D (tex canvas, MMB-pan viewport, 2D↔3D texture bridge, mode 5 texture paint) in one codebase. Headless `--test`/`--shot`/`--drive`, Windows cross (`make win`/`package`), modern dark theme, CJK+Cyrillic fonts.
 - `tools/` -> Scaffolding and automation scripts:
   - `tools/scaffold.py` -> Instant repo generator CLI.
-  - `tools/drive.lua` -> Frame-accurate headless input & tape driver.
+  - `tools/drive.lua` -> Frame-accurate headless input & tape driver (reference for template `editor/lua/drive.lua`).
   - `tools/embed.py` -> Font & asset C header embedder.
 - `docs/` -> Deep research & technical references:
   - `docs/DIRECT_MANIPULATION_AND_FEEL.md` -> HCI principles, Fitts's law, spring physics.
   - `docs/WINDOWS_COMPAT_AND_WIN7.md` -> Cross-compilation, SDL_Renderer vs WGL, static runtimes.
   - `docs/ZERO_DATA_LOSS_AND_UNDO.md` -> Undo coalescing, state journaling, crash resilience.
+  - `docs/STACK_EVALUATION_PLAN.md` -> A-vs-B stack evaluation plan + template findings.
+  - `docs/CUBEFORGE_SPEC.md` -> The CubeForge evaluation test-app spec.
+  - `docs/IMGUI_WRAPPER_DESIGN.md` -> Scoped ImGui wrapper + balance-tracker design.
 
 ## Test Gate Architecture
 The `make test` gate runs four test suites in order. All must pass:
@@ -72,12 +75,12 @@ Gemini Flash is sufficient for ~80% of the work (Lua feature code, panel layout,
 | **3D math / projection bugs** | Either | Matrix algebra, winding order, projection correctness |
 
 ### Can Gemini Spawn Opus/DeepSeek Autonomously?
-**Not yet, but feasible.** The mechanism would be:
-1. Gemini runs `make test` and `make shot` after completing work
-2. If tests pass, Gemini shells out: `omp --model google-antigravity/claude-opus-4-6 --oneshot "Review /opt/src/foo for the issues in REVIEW_DOSSIER.md, write findings to docs/review.md"`
-3. Gemini reads the review output and applies fixes
-
-**Blockers**: omp doesn't currently support `--oneshot` mode for non-interactive review. The workaround is manual: human switches model or opens a second session. This is a reasonable human-in-the-loop checkpoint — adversarial review is precisely where human judgment adds most value.
+**Yes — `omp -p` (non-interactive) mode works (verified 2026-08-19)**:
+```sh
+omp -p --model google-antigravity/gemini-3.7-flash --cwd /opt/src/foo @/tmp/task.md
+```
+Run in background, collect output, act on it. Used for the CubeForge stack
+evaluation. `--mode json` exposes model identity + usage for verification.
 
 ### Cost Analysis
 - Gemini 3.7 Flash (AI Pro): **Free** for typical usage within subscription quota
@@ -89,15 +92,25 @@ Gemini Flash is sufficient for ~80% of the work (Lua feature code, panel layout,
 
 ## Current Project Status & Pending Work
 
-### Verified Status (2026-08-18)
-- **Templates**: `templates/2d-canvas/` and `templates/3d-viewport/` are fully hardened with SDL_Renderer/D3D11 backends, static runtime linking, Lua 5.4 compatibility assertions, C++-to-Lua binding parity gates, and headless interactive UI smoke tests.
-- **Skills & Scaffolding**: `skills/native-ui-ux`, `skills/imgui-recipes`, and `skills/scaffold-native-app` are fully synced with Nix home-manager (`/opt/src/nix-lab/hosts/wslop/hm/skills/`) and active harness (`~/.omp/agent/skills/`).
-- **Evaluation Apps**:
-  - `texturewrangler` (`/opt/src/texturewrangler`): 350/350 tests green, golden composite verified.
+### Verified Status (2026-08-19)
+- **ONE template, raylib-only**: `templates/raylib/` is the single starter (renamed from 3d-raylib). 3D AND 2D in one codebase — 2D canvas (lp.tex.*, lp.cam2d.*, MMB-pan viewport) is a subset of the 3D template, with a 2D↔3D texture bridge (paint a texture, apply to the 3D mesh). All SDL templates (2d-canvas, 3d-viewport, 3d-opengl) deleted — the evaluation showed raylib wins outright.
+- **Stack evaluation verdict implemented**: Raylib + rlImGui + Lua, complex 3D Lua-only (models/textures/RLSL shaders), headless `--test`/`--shot`/`--drive`, Windows cross (`make win`/`package`), modern dark theme (deep slate + amber), CJK+Cyrillic fonts (Inter + IPA Gothic merged).
+- **Scoped ImGui Wrappers**: 16 scoped Begin/End wrappers (`ig.window`, `ig.child`, …) + frame-end balance checker (`ig_balance_check()`). Eliminates the "Missing EndChild()" crash class. 112 bindings verified.
+- **Camera doctrine (skills/native-ui-ux)**: 3D = Godot editor language (MMB tilt, RMB FPS fly + WASD/QE, Shift+MMB pan, wheel dolly); 2D = MMB pan, wheel cursor-anchored zoom.
+- **Evaluation Apps** (reference, SDL-era):
+  - `texturewrangler` (`/opt/src/texturewrangler`): 355/355 tests green, golden composite verified.
   - `godot-blockout` (`/opt/src/godot-blockout`): 35/35 tests green, 1-click `.tscn` export verified.
   - `lowpoly-painter` (`/opt/src/lowpoly-painter`): 30/30 tests green, auto-UV unwrapping & baking verified.
 
+### Known Limitations & Active Investigation
+1. **Stack Evaluation — COMPLETE (2026-08-19)**: ImGui is a hard requirement; Odin/Zig rejected (no first-class ImGui). Two stacks built and evaluated head-to-head with the same CubeForge spec on Gemini 3.7 Flash (`omp -p` non-interactive sessions, pinned model). Results: `docs/EVALUATION_RESULTS.md`.
+   - **Stack A (OpenGL 3.3)**: all gates passed but **+368 C++ lines** for 5 GPU features; deleted.
+   - **Stack B (Raylib)**: all gates passed with **+89 C++ lines** of thin wrappers; became the template.
+   - **VERDICT: Raylib wins (4.9 vs 4.4 weighted)** — 4× less C++ work for identical 3D features, 30% faster completion. Gemini stays in Lua.
+2. **Windows target verified (2026-08-19)**: `make win` + `make package` via `pkgsCross.mingwW64.raylib`; ships exe + libraylib.dll + glfw3.dll (raylib links GLFW dynamically) + libmcfgthread + lua/ + tests/ + fonts. 46/46 tests pass on the Windows host, headless shot works, live window render vision-verified. Recipe in scaffold skill §5b.
+
 ### Pending Work & Next Session Roadmap
-1. **Automated Multi-Model Adversarial Review Wrapper**: Implement a scripted orchestrator once non-interactive review execution lands in the harness.
-2. **High-DPI / Fractional Scaling Pass**: Add dynamic font size recalculation and UI scaling factor to `theme.lua` across both templates.
-3. **Tileset Variation Layer Pattern**: Add a 4x4 procedural tileset variation modifier to the 2D canvas template.
+1. **Harder-spec re-eval** (textured materials, custom shaders, GPU picking) to confirm the raylib advantage widens with complexity.
+2. **Sync skills to deployed harness**: push updated skill .md files to Nix home-manager and active harness.
+3. **High-DPI / Fractional Scaling Pass**: dynamic font size recalculation and UI scaling factor.
+4. **CJK font swap note**: IPA Gothic (TrueType, works with ImGui's stb loader) is the default CJK fallback; swap to a full SC TTF (e.g. WenQuanYi) via `FONT_CJK` for complete simplified-Chinese coverage.

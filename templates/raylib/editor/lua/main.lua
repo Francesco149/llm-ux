@@ -1,0 +1,952 @@
+-- editor/lua/main.lua — CubeForge (2D + 3D) (Raylib + ImGui + Lua)
+--
+-- Features:
+-- 1. 3D Viewport with Tilt (MMB), 3D Pan (Shift+MMB), Fly (RMB+WASD/QE), Dolly (Wheel), Inertial damping (~22/s)
+-- 2. Primitive spawning (+ Box, + Cylinder)
+-- 3. Face selection via GetScreenToWorldRay + Möller–Trumbore (front-face culling)
+-- 4. Modal Extrude (E): live mouse pulling along normal, LClick/Enter commit, RClick/Esc cancel, floating HUD
+-- 5. Modal Move (G): live mouse pulling in view plane, commit/cancel, floating HUD
+-- 6. Vertex Painting (Mode 4 / B): brush radius/color, stroke coalescing, 3D vertex display
+-- 7. ImGui Side panel: mode pills (1..5), brush settings, hotkey reference, scoped wrappers
+-- 8. Snapshot Undo/Redo (Ctrl+Z / Ctrl+Y)
+-- 9. Wavefront OBJ Export (Button / Ctrl+E)
+-- 10. 2D Texture Paint (Mode 5): the viewport becomes a 512x512 canvas view
+--     (lp.cam2d; MMB pan, wheel cursor-anchored zoom, LMB stamps). The canvas
+--     texture is bound to the active 3D mesh via lp.tex.apply_to_model, so
+--     painting shows up on the cube — 2D and 3D in ONE codebase.
+
+local ig = lp.ig
+local rl = lp.rl
+local geom = require("geom")
+local undo = require("undo")
+local doc = require("doc")
+
+-- ── Camera State ────────────────────────────────────────────────────────────
+local cam = {
+    yaw = 45.0,
+    pitch = 30.0,
+    dist = 8.0,
+    target = { 0, 1.0, 0 },
+    -- Smooth targets for exponential damping
+    target_yaw = 45.0,
+    target_pitch = 30.0,
+    target_dist = 8.0,
+    target_pos = { 0, 1.0, 0 },
+    eye = { 5, 5, 5 },
+}
+
+-- ── 2D Camera State ─────────────────────────────────────────────────────────
+-- 2D doctrine: MMB pans, wheel zooms anchored at the cursor. The Lua table is
+-- the single source of truth; lp.cam2d.set keeps the C++ Camera2D in sync so
+-- lp.rl.screen_to_world / begin_mode2d use the exact same transform.
+local cam2d = { pan = { 256, 256 }, zoom = 1.0 }
+
+-- Right sidebar width (resizable via the left-edge drag strip).
+local sidebar_w = 280
+
+local function sync_cam2d()
+    lp.cam2d.set(cam2d.pan[1], cam2d.pan[2], cam2d.zoom)
+end
+
+local function deg2rad(d) return d * math.pi / 180.0 end
+local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
+
+-- ── Deferred Scene Setup (keeps --test GL-free) ─────────────────────────────
+local scene_ready = false
+local function setup_scene()
+    if scene_ready then return end
+    scene_ready = true
+    _G.gl_ready = true  -- GL is live; model rebuilds are now safe (--test stays GL-free)
+    -- Initialize default box if not present
+    if #doc.meshes == 0 then
+        doc.init_default()
+    end
+    -- GPU resources (GL is live here — first rendered frame):
+    -- 1) the default box gets a GPU model + perlin texture (default look)
+    local m1 = doc.meshes[1]
+    if m1 and m1.kind == "box" and m1.dims and not m1.model_id then
+        m1.model_id = rl.load_model_cube(m1.dims.w, m1.dims.h, m1.dims.d)
+        doc.perlin_tex_id = rl.load_texture_perlin(256, 256, 2.0)
+        rl.set_material_texture(m1.model_id, rl.MAP_ALBEDO, doc.perlin_tex_id)
+        m1.tex_binding = { kind = "perlin" }  -- survives model rebuilds
+    end
+    -- 2) the offscreen 512x512 paint canvas (white)
+    doc.canvas_init()
+end
+
+-- ── GPU mesh registry (textured render path) ────────────────────────────────
+-- Meshes that are still pristine primitives get a raylib Model so the canvas
+-- (or perlin) texture can be shown on them. Geometry edits drop the model
+-- (flat-shaded fallback); restored snapshots clone without GPU ids.
+local function ensure_mesh_model(mesh, m_idx)
+    if mesh.model_id then return end
+    if mesh.kind == "box" and mesh.dims then
+        mesh.model_id = rl.load_model_cube(mesh.dims.w, mesh.dims.h, mesh.dims.d)
+    elseif mesh.kind == "cylinder" and mesh.dims then
+        mesh.model_id = rl.load_model_cylinder(mesh.dims.r, mesh.dims.h, 16)
+    end
+    if mesh.model_id then
+        -- Re-apply the recorded texture binding (perlin default or canvas).
+        doc.apply_tex_binding(mesh)
+    end
+end
+
+-- Enter 2D texture-paint mode: the canvas becomes the active mesh's texture.
+local function enter_texture_paint()
+    setup_scene()
+    doc.canvas_init()
+    local m_idx = doc.selected_mesh_idx or 1
+    local mesh = doc.meshes[m_idx]
+    if mesh then
+        ensure_mesh_model(mesh, m_idx)
+        doc.canvas_apply_to(m_idx)
+    end
+    doc.mode = 5
+    doc.status_msg = "Mode: Texture Paint (2D) — MMB Pan, Wheel Zoom"
+end
+
+local MODE_NAMES = { "Vertex", "Edge", "Face", "Vertex Paint", "Texture Paint (2D)" }
+local function set_mode(m)
+    if m == 5 then
+        enter_texture_paint()
+    else
+        doc.mode = m
+        doc.status_msg = "Mode: " .. (MODE_NAMES[m] or tostring(m))
+    end
+end
+
+-- Resize handling doctrine:
+--   CHEAP per-frame state (camera aspect, viewport rect, cam2d offset) MUST
+--   read the live window size every frame — raylib's Camera3D does this
+--   internally, and cam2d syncs per frame, so nothing stretches permanently.
+--   HEAVY work on resize (texture re-upload, cache/geometry rebuilds) MUST be
+--   debounced: run only after the size stops changing for ~120 ms.
+local resize_debounce = { last_w = 0, last_h = 0, timer = 0 }
+local function resize_settled(dt)
+    local sw, sh = rl.get_screen_size()
+    if sw ~= resize_debounce.last_w or sh ~= resize_debounce.last_h then
+        resize_debounce.last_w, resize_debounce.last_h = sw, sh
+        resize_debounce.timer = 0.12
+        return false
+    end
+    if resize_debounce.timer > 0 then
+        resize_debounce.timer = resize_debounce.timer - (dt or 0.016)
+        if resize_debounce.timer <= 0 then return true end
+    end
+    return false
+end
+
+-- ── 2D Canvas Input & Rendering (Mode 5) ────────────────────────────────────
+-- 2D doctrine: MMB pans the view, wheel zooms anchored at the cursor, LMB
+-- paints the canvas in world space (the same world the cube lives in — the
+-- canvas is just another surface, and lp.tex.apply_to_model bridges it to 3D).
+local function handle_canvas_input(mx, my, sw, sh, io)
+    local over_ui = (mx >= sw - sidebar_w - 8) or (my <= 48 and mx >= sw * 0.5 - 280 and mx <= sw * 0.5 + 280)
+    if over_ui and io.want_capture_mouse then return end
+
+    -- Wheel: cursor-anchored zoom (the world point under the cursor stays put).
+    -- raylib wheel: positive = scroll up = zoom IN.
+    local wheel = rl.get_mouse_wheel()
+    if wheel ~= 0 then
+        local wx, wy = rl.screen_to_world(mx, my)
+        cam2d.zoom = clamp(cam2d.zoom * (1.15 ^ wheel), 0.1, 16.0)
+        cam2d.pan[1] = wx - (mx - sw * 0.5) / cam2d.zoom
+        cam2d.pan[2] = wy - (my - sh * 0.5) / cam2d.zoom
+        sync_cam2d()
+    end
+
+    -- MMB: pan (content follows the drag, scaled by zoom)
+    if rl.is_mouse_button_down(rl.MOUSE_MIDDLE) then
+        local dx, dy = rl.get_mouse_delta()
+        cam2d.pan[1] = cam2d.pan[1] - dx / cam2d.zoom
+        cam2d.pan[2] = cam2d.pan[2] - dy / cam2d.zoom
+        sync_cam2d()
+    end
+
+    -- LMB: paint a stroke on the canvas
+    if not over_ui then
+        if rl.is_mouse_button_down(rl.MOUSE_LEFT) then
+            local wx, wy = rl.screen_to_world(mx, my)
+            doc.canvas_stroke(wx, wy)
+        elseif doc.canvas.stroke_active then
+            doc.canvas_stroke_end()
+        end
+    end
+end
+
+local function draw_canvas_2d()
+    local tid = doc.canvas.tex_id
+    if not tid then return end
+    sync_cam2d()
+    -- Live stroke feedback: push the CPU Image to the GPU while painting
+    if doc.canvas.stroke_active then
+        lp.tex.upload(tid)
+    end
+    rl.begin_mode2d()
+    -- Canvas frame (backdrop + border) in world space
+    rl.draw_rect_2d(-5, -5, 522, 522, 30, 28, 34, 255)
+    rl.draw_rect_2d(-2, -2, 516, 516, 96, 82, 58, 255)
+    rl.draw_texture(tid, 0, 0, 512, 512)
+    -- Brush cursor ring (world space)
+    local mx, my = rl.get_mouse_pos()
+    local wx, wy = rl.screen_to_world(mx, my)
+    rl.draw_circle_lines_2d(wx, wy, doc.brush_px(), 1.5, 250, 210, 70, 220)
+    rl.draw_text_2d("Texture Paint (2D) - MMB Pan · Wheel Zoom", 12, 518, 18, 0.9, 0.7, 0.2, 210)
+    rl.end_mode2d()
+end
+
+-- ── Camera Update & Input ───────────────────────────────────────────────────
+local function update_camera(dt)
+    local f = 1.0 - math.exp(-dt * 22.0)
+    cam.yaw = cam.yaw + (cam.target_yaw - cam.yaw) * f
+    cam.pitch = cam.pitch + (cam.target_pitch - cam.pitch) * f
+    cam.dist = cam.dist + (cam.target_dist - cam.dist) * f
+
+    cam.target[1] = cam.target[1] + (cam.target_pos[1] - cam.target[1]) * f
+    cam.target[2] = cam.target[2] + (cam.target_pos[2] - cam.target[2]) * f
+    cam.target[3] = cam.target[3] + (cam.target_pos[3] - cam.target[3]) * f
+
+    local ry = deg2rad(cam.yaw)
+    local rp = deg2rad(cam.pitch)
+    local cp = math.cos(rp)
+
+    cam.eye[1] = cam.target[1] + cam.dist * cp * math.sin(ry)
+    cam.eye[2] = cam.target[2] + cam.dist * math.sin(rp)
+    cam.eye[3] = cam.target[3] + cam.dist * cp * math.cos(ry)
+
+    rl.set_camera(cam.eye[1], cam.eye[2], cam.eye[3],
+                  cam.target[1], cam.target[2], cam.target[3], 60)
+end
+
+-- ── Keyboard & Mouse Shortcuts ──────────────────────────────────────────────
+local function handle_hotkeys()
+    local io = ig.get_io()
+    local ctrl_down = rl.is_key_down(rl.key.LeftCtrl) or rl.is_key_down(rl.key.RightCtrl) or io.key_ctrl
+    local shift_down = rl.is_key_down(rl.key.LeftShift) or rl.is_key_down(rl.key.RightShift) or io.key_shift
+
+    -- Undo: Ctrl+Z (and not shift) — canvas in 2D mode, mesh undo otherwise
+    if ctrl_down and not shift_down and (rl.is_key_pressed(rl.key.Z) or ig.is_key_pressed(ig.key.Z)) then
+        if doc.mode == 5 then doc.canvas_undo() else doc.perform_undo() end
+        return
+    end
+
+    -- Redo: Ctrl+Y or Ctrl+Shift+Z
+    if (ctrl_down and (rl.is_key_pressed(rl.key.Y) or ig.is_key_pressed(ig.key.Y))) or
+       (ctrl_down and shift_down and (rl.is_key_pressed(rl.key.Z) or ig.is_key_pressed(ig.key.Z))) then
+        if doc.mode == 5 then doc.canvas_redo() else doc.perform_redo() end
+        return
+    end
+
+    -- OBJ Export: Ctrl+E
+    if ctrl_down and (rl.is_key_pressed(rl.key.E) or ig.is_key_pressed(ig.key.E)) then
+        doc.export_obj("build/cubeforge_model.obj")
+        return
+    end
+
+    -- Modal action confirms/cancels via keys
+    if doc.action then
+        if rl.is_key_pressed(rl.key.Enter) or ig.is_key_pressed(ig.key.Enter) then
+            doc.confirm_action()
+            return
+        end
+        if rl.is_key_pressed(rl.key.Escape) or ig.is_key_pressed(ig.key.Escape) then
+            doc.cancel_action()
+            return
+        end
+    end
+
+    -- Mode switching: 1, 2, 3, 4, 5, B (only if not typing in text input)
+    if not io.want_text_input then
+        if rl.is_key_pressed(rl.key["1"]) or ig.is_key_pressed(ig.key["1"]) then
+            set_mode(1)
+        elseif rl.is_key_pressed(rl.key["2"]) or ig.is_key_pressed(ig.key["2"]) then
+            set_mode(2)
+        elseif rl.is_key_pressed(rl.key["3"]) or ig.is_key_pressed(ig.key["3"]) then
+            set_mode(3)
+        elseif rl.is_key_pressed(rl.key["4"]) or ig.is_key_pressed(ig.key["4"]) or
+               rl.is_key_pressed(rl.key.B) or ig.is_key_pressed(ig.key.B) then
+            set_mode(4)
+        elseif rl.is_key_pressed(rl.key["5"]) or ig.is_key_pressed(ig.key["5"]) then
+            set_mode(5)
+        end
+
+        -- Extrude: E (when not ctrl; 3D modes only)
+        if not ctrl_down and doc.mode ~= 5 and
+           (rl.is_key_pressed(rl.key.E) or ig.is_key_pressed(ig.key.E)) then
+            if not doc.action then
+                local mx, my = rl.get_mouse_pos()
+                doc.start_extrude(mx, my)
+            end
+        end
+
+        -- Move / Grab: G (3D modes only)
+        if not ctrl_down and doc.mode ~= 5 and
+           (rl.is_key_pressed(rl.key.G) or ig.is_key_pressed(ig.key.G)) then
+            if not doc.action then
+                local mx, my = rl.get_mouse_pos()
+                doc.start_move(mx, my)
+            end
+        end
+    end
+end
+
+-- ── Viewport Input (Camera & Tools) ─────────────────────────────────────────
+local is_painting = false
+
+local function handle_viewport_input()
+    local dt = rl.get_frame_time()
+    local mx, my = rl.get_mouse_pos()
+    local sw, sh = rl.get_screen_size()
+    local io = ig.get_io()
+
+    handle_hotkeys()
+
+    -- 0. 2D texture-paint mode (mode 5): MMB pan, wheel zoom, LMB paint.
+    --    The 3D camera stays inert while the 2D viewport owns the frame.
+    if doc.mode == 5 then
+        handle_canvas_input(mx, my, sw, sh, io)
+        return
+    end
+
+    -- 1. In-flight modal interaction (Extrude / Move)
+    if doc.action then
+        -- Confirm on Left-Click
+        if rl.is_mouse_button_pressed(rl.MOUSE_LEFT) then
+            doc.confirm_action()
+            return
+        end
+        -- Cancel on Right-Click
+        if rl.is_mouse_button_pressed(rl.MOUSE_RIGHT) then
+            doc.cancel_action()
+            return
+        end
+
+        -- Update in-flight motion
+        if doc.action == "extrude" then
+            doc.update_extrude(mx, my)
+        elseif doc.action == "move" then
+            doc.update_move(mx, my, cam)
+        end
+        return
+    end
+
+    -- 2. Check if mouse is over UI area (Right sidebar is 280px wide; top toolbar is 48px high)
+    local over_ui = (mx >= sw - sidebar_w - 8) or (my <= 48 and mx >= sw * 0.5 - 280 and mx <= sw * 0.5 + 280)
+    if io.want_capture_mouse and over_ui then
+        update_camera(dt)
+        return
+    end
+
+    -- 3. Camera Dolly (Scroll Wheel)
+    local wheel = rl.get_mouse_wheel()
+    if wheel ~= 0 then
+        cam.target_dist = clamp(cam.target_dist * (1.15 ^ (-wheel)), 1.0, 50.0)
+    end
+
+    -- 4. Camera (Godot 3D editor language):
+    --    Middle-drag = tilt (orbit yaw/pitch)
+    --    Shift+Middle-drag = 3D pan (translate view center)
+    --    Right-drag hold = FPS fly (look + WASD/QE movement)
+    local shift_down = rl.is_key_down(rl.key.LeftShift) or rl.is_key_down(rl.key.RightShift) or io.key_shift
+    local mmb = rl.is_mouse_button_down(rl.MOUSE_MIDDLE)
+    local rmb = rl.is_mouse_button_down(rl.MOUSE_RIGHT)
+
+    -- Shift+Middle: 3D pan (translate target in the view plane)
+    if shift_down and mmb then
+        local dx, dy = rl.get_mouse_delta()
+        local ry = deg2rad(cam.yaw)
+        local right_x = math.cos(ry)
+        local right_z = -math.sin(ry)
+        local speed = cam.dist * 0.002
+        cam.target_pos[1] = cam.target_pos[1] - right_x * dx * speed
+        cam.target_pos[3] = cam.target_pos[3] - right_z * dx * speed
+        cam.target_pos[2] = cam.target_pos[2] + dy * speed
+
+    -- Middle: tilt (orbit yaw/pitch around the view center)
+    elseif mmb then
+        local dx, dy = rl.get_mouse_delta()
+        cam.target_yaw = cam.target_yaw - dx * 0.4
+        cam.target_pitch = clamp(cam.target_pitch + dy * 0.4, -89, 89)
+
+    -- Right-drag hold: FPS fly (look + move)
+    elseif rmb then
+        local dx, dy = rl.get_mouse_delta()
+        cam.target_yaw = cam.target_yaw - dx * 0.25
+        cam.target_pitch = clamp(cam.target_pitch + dy * 0.25, -89, 89)
+        -- WASD/QE movement along camera axes (Godot fly-mode language)
+        local ry = deg2rad(cam.yaw)
+        local rp = deg2rad(cam.pitch)
+        local cp = math.cos(rp)
+        local fwd = { -cp * math.sin(ry), -math.sin(rp), -cp * math.cos(ry) }
+        local right = { math.cos(ry), 0, -math.sin(ry) }
+        local speed = 4.0 * (cam.dist / 8.0) * dt   -- scale with zoom
+        local move = { 0, 0, 0 }
+        if rl.is_key_down(rl.key.W) then
+            move[1] = move[1] + fwd[1]; move[2] = move[2] + fwd[2]; move[3] = move[3] + fwd[3]
+        end
+        if rl.is_key_down(rl.key.S) then
+            move[1] = move[1] - fwd[1]; move[2] = move[2] - fwd[2]; move[3] = move[3] - fwd[3]
+        end
+        if rl.is_key_down(rl.key.D) then
+            move[1] = move[1] + right[1]; move[2] = move[2] + right[2]; move[3] = move[3] + right[3]
+        end
+        if rl.is_key_down(rl.key.A) then
+            move[1] = move[1] - right[1]; move[2] = move[2] - right[2]; move[3] = move[3] - right[3]
+        end
+        if rl.is_key_down(rl.key.Q) or rl.is_key_down(rl.key.E) then
+            local up = (rl.is_key_down(rl.key.Q) and -1) or 1
+            move[2] = move[2] + up
+        end
+        local len = math.sqrt(move[1]^2 + move[2]^2 + move[3]^2)
+        if len > 0.001 then
+            cam.target_pos[1] = cam.target_pos[1] + move[1] / len * speed
+            cam.target_pos[2] = cam.target_pos[2] + move[2] / len * speed
+            cam.target_pos[3] = cam.target_pos[3] + move[3] / len * speed
+        end
+    end
+
+    -- 5. Left Click / Drag Actions (Selection & Vertex Paint)
+    if not over_ui then
+        if doc.mode == 4 then
+            -- Vertex Paint Mode
+            if rl.is_mouse_button_down(rl.MOUSE_LEFT) then
+                is_painting = true
+                doc.paint_stroke(mx, my)
+            elseif is_painting and not rl.is_mouse_button_down(rl.MOUSE_LEFT) then
+                is_painting = false
+                doc.end_paint_stroke()
+            end
+        else
+            -- Selection Modes (Vertex / Edge / Face)
+            if rl.is_mouse_button_pressed(rl.MOUSE_LEFT) then
+                doc.select_at(mx, my)
+            end
+        end
+    end
+
+    update_camera(dt)
+end
+
+
+-- ── 3D Scene Rendering ──────────────────────────────────────────────────────
+local LIGHT_DIR = geom.normalize({ 0.45, 0.85, 0.35 })
+
+local function render_mesh_3d(mesh, is_active_mesh)
+    local verts = mesh.verts
+    local faces = mesh.faces
+
+    for f_idx, face in ipairs(faces) do
+        local fv = face.verts
+        local num_v = #fv
+        local is_sel_face = (is_active_mesh and f_idx == doc.selected_face_idx)
+
+        -- Normal & Directional Light Dot
+        local norm = face.normal or geom.calc_face_normal(verts, fv)
+        local dot = geom.dot(norm, LIGHT_DIR)
+        local lit = math.max(0.25, math.min(1.0, 0.35 + 0.65 * dot))
+
+        -- Base face color
+        local fc = face.color or { 170, 190, 215, 255 }
+
+        -- Fan triangulation for quad / n-gon
+        if num_v >= 3 then
+            local v0 = verts[fv[1]]
+            for i = 2, num_v - 1 do
+                local v1 = verts[fv[i]]
+                local v2 = verts[fv[i + 1]]
+                if v0 and v1 and v2 then
+                    local r, g, b
+
+                    if is_sel_face then
+                        -- Selected face highlight: warm golden amber
+                        r = math.floor(math.min(255, 245 * lit + 30))
+                        g = math.floor(math.min(255, 175 * lit + 20))
+                        b = math.floor(math.min(255, 45 * lit))
+                    else
+                        -- Average vertex colors with face color modulation
+                        local avg_vr = ((v0.r or fc[1]) + (v1.r or fc[1]) + (v2.r or fc[1])) / 3.0
+                        local avg_vg = ((v0.g or fc[2]) + (v1.g or fc[2]) + (v2.g or fc[2])) / 3.0
+                        local avg_vb = ((v0.b or fc[3]) + (v1.b or fc[3]) + (v2.b or fc[3])) / 3.0
+
+                        r = math.floor(math.min(255, avg_vr * lit))
+                        g = math.floor(math.min(255, avg_vg * lit))
+                        b = math.floor(math.min(255, avg_vb * lit))
+                    end
+
+                    rl.draw_triangle_3d(
+                        v0.x, v0.y, v0.z,
+                        v1.x, v1.y, v1.z,
+                        v2.x, v2.y, v2.z,
+                        r, g, b, 255
+                    )
+                end
+            end
+        end
+
+        -- Wireframe edges (shared with the textured render path)
+        local wire_r = is_sel_face and 255 or 40
+        local wire_g = is_sel_face and 220 or 50
+        local wire_b = is_sel_face and 60 or 75
+        local wire_a = is_sel_face and 255 or 200
+
+        for i = 1, num_v do
+            local vi1 = fv[i]
+            local vi2 = fv[(i % num_v) + 1]
+            local va = verts[vi1]
+            local vb = verts[vi2]
+            if va and vb then
+                rl.draw_line_3d(va.x, va.y, va.z, vb.x, vb.y, vb.z,
+                    wire_r, wire_g, wire_b, wire_a)
+            end
+        end
+    end
+
+    -- Mode 1 (Vertex Mode): Draw vertex handles
+    if doc.mode == 1 and is_active_mesh then
+        for _, v in ipairs(verts) do
+            rl.draw_sphere(v.x, v.y, v.z, 0.045, 250, 210, 70, 255)
+        end
+    end
+end
+
+-- Wireframe overlay for textured meshes (selection highlight preserved).
+local function draw_mesh_wire(mesh, is_active_mesh)
+    local verts = mesh.verts
+    local faces = mesh.faces
+    for f_idx, face in ipairs(faces) do
+        local fv = face.verts
+        local num_v = #fv
+        local is_sel_face = (is_active_mesh and f_idx == doc.selected_face_idx)
+        local wire_r = is_sel_face and 255 or 40
+        local wire_g = is_sel_face and 220 or 50
+        local wire_b = is_sel_face and 60 or 75
+        local wire_a = is_sel_face and 255 or 200
+        for i = 1, num_v do
+            local vi1 = fv[i]
+            local vi2 = fv[(i % num_v) + 1]
+            local va = verts[vi1]
+            local vb = verts[vi2]
+            if va and vb then
+                rl.draw_line_3d(va.x, va.y, va.z, vb.x, vb.y, vb.z,
+                    wire_r, wire_g, wire_b, wire_a)
+            end
+        end
+    end
+end
+
+-- ── 3D Viewport Drawing (Called inside BeginMode3D) ─────────────────────────
+function lp_draw3d()
+    setup_scene()
+    handle_viewport_input()
+
+    -- Mode 5: the 3D scene is hidden; the 2D canvas view draws in lp_draw2d
+    -- (after EndMode3D, where raylib 6.0's BeginMode2D has the ortho base)
+    if doc.mode == 5 then
+        return
+    end
+
+    -- Ground reference grid
+    rl.draw_grid(20, 1.0)
+
+    -- Render all document meshes with hardware depth testing. Meshes with a
+    -- GPU model (pristine primitives) render textured — the canvas texture
+    -- applied via lp.tex.apply_to_model is the 2D→3D bridge; everything else
+    -- falls back to the flat-shaded renderer.
+    for m_idx, mesh in ipairs(doc.meshes) do
+        local is_active = (m_idx == doc.selected_mesh_idx)
+        if mesh.model_id then
+            ensure_mesh_model(mesh, m_idx)
+            local o = mesh.origin or { x = 0, y = 0, z = 0 }
+            rl.draw_model(mesh.model_id, o.x, o.y, o.z, 1.0, 255, 255, 255, 255)
+            draw_mesh_wire(mesh, is_active)
+        else
+            render_mesh_3d(mesh, is_active)
+        end
+    end
+
+    -- Paint Mode: draw 3D brush indicator at ray hit point
+    if doc.mode == 4 and not doc.action then
+        local mx, my = rl.get_mouse_pos()
+        local ox, oy, oz, dx, dy, dz = lp.rl.get_ray(mx, my)
+        local best_dist = math.huge
+        local best_hit = nil
+        for _, mesh in ipairs(doc.meshes) do
+            local hit = geom.raycast_mesh(mesh, { ox, oy, oz }, { dx, dy, dz })
+            if hit and hit.dist < best_dist then
+                best_dist = hit.dist
+                best_hit = hit
+            end
+        end
+        if best_hit then
+            local hp = best_hit.hit_point
+            local bc = doc.brush.color
+            -- Reticle at the TRUE world-space brush radius (was radius*0.15 —
+            -- 6.7x smaller than the painted region; that mismatch is a footgun).
+            rl.draw_sphere_wires(hp[1], hp[2], hp[3], doc.brush.radius, 12, 12, bc[1], bc[2], bc[3], 255)
+        end
+    end
+end
+
+-- ── 2D Viewport Drawing (Called after EndMode3D, inside BeginDrawing) ───────
+-- raylib 6.0 quirk: BeginMode2D no longer installs an ortho projection, so 2D
+-- content must be drawn outside BeginMode3D. Mode 5 owns this pass.
+function lp_draw2d()
+    if doc.mode == 5 then
+        draw_canvas_2d()
+    end
+end
+
+-- ── ImGui UI Panels (Called inside rlImGuiBegin/End) ────────────────────────
+-- Shared image-import pipeline: drag&drop, Ctrl+V paste (clipboard file path),
+-- and the file-picker button all route here. Loads the image into the canvas
+-- (resized to 512x512), uploads it, and applies it to the active mesh so it
+-- becomes the cube's texture. Graceful rejection: unsupported/unreadable
+-- inputs only set a status message — the existing canvas is untouched.
+local function import_image(path)
+    if not path or path == "" then
+        doc.status_msg = "Import: no file"
+        return false
+    end
+    path = path:gsub("^%s+", ""):gsub("%s+$", "")
+    -- Linux clipboard uri-list arrives as file:///abs/path — normalize
+    if path:sub(1, 7) == "file://" then
+        path = path:sub(8)
+        if path:sub(1, 1) == "/" and path:sub(2, 2) == "/" then
+            path = path:sub(2)  -- file://host/path → /path (local host)
+        end
+        path = path:gsub("%%20", " ")
+    end
+    if path == "" then
+        doc.status_msg = "Import: empty path"
+        return false
+    end
+    if not _G.gl_ready then
+        doc.status_msg = "Import: not ready"
+        return false
+    end
+    doc.canvas_init()
+    local ok = lp.tex.load_image_from_file(doc.canvas.tex_id, path)
+    if not ok then
+        doc.status_msg = "Import rejected: unsupported or unreadable: " .. path
+        return false
+    end
+    lp.tex.upload(doc.canvas.tex_id)
+    local m_idx = doc.selected_mesh_idx or 1
+    local mesh = doc.meshes[m_idx]
+    if mesh then
+        ensure_mesh_model(mesh, m_idx)
+        doc.canvas_apply_to(m_idx)
+    end
+    doc.status_msg = "Imported texture: " .. path
+    return true
+end
+
+function lp_frame()
+    local sw, sh = rl.get_screen_size()
+    -- Debounced resize hook: put heavy rebuilds behind this guard.
+    if resize_settled(rl.get_frame_time()) then
+        -- e.g. re-upload canvases, rebuild caches — nothing heavy today.
+    end
+
+    -- File drag & drop (raylib 6.0: LoadDroppedFiles takes the first path)
+    if rl.is_file_dropped() then
+        local dropped = rl.take_dropped_file()
+        if dropped then
+            import_image(dropped)
+        end
+    end
+    -- Paste (Ctrl+V): clipboard holds a file (CF_HDROP on Windows) or a path
+    -- → import; else reject politely. Uses clipboard_file_path so copying a
+    -- file in Explorer pastes it WITHOUT GLFW's clipboard-string error.
+    local ctrl = rl.is_key_down(rl.key.LeftCtrl) or rl.is_key_down(rl.key.RightCtrl) or ig.get_io().key_ctrl
+    if ctrl and (rl.is_key_pressed(rl.key.V) or ig.is_key_pressed(ig.key.V)) then
+        local txt = rl.clipboard_file_path()
+        if txt and #txt > 0 then
+            import_image(txt)
+        else
+            doc.status_msg = "Paste: clipboard has no file or image path"
+        end
+    end
+
+    -- 1. Top Floating Pill Toolbar (Centered over 3D viewport area)
+    local panel_w = sidebar_w
+    local vp_w = sw - panel_w
+    local tb_w = 540
+    local tb_h = 42
+    ig.set_next_window_pos((vp_w - tb_w) * 0.5, 12)
+    ig.set_next_window_size(tb_w, tb_h)
+    ig.set_next_window_bg_alpha(0.92)
+    local tb_flags = 1 + 2 + 32 -- NoTitleBar | NoResize | NoSavedSettings
+    ig.window("##top_toolbar", tb_flags, function()
+        -- Primitives
+        if ig.button("+ Box") then
+            doc.add_box()
+        end
+        ig.same_line()
+        if ig.button("+ Cylinder") then
+            doc.add_cylinder()
+        end
+
+        ig.same_line()
+        ig.text_colored("|", 0.4, 0.4, 0.45, 1.0)
+        ig.same_line()
+
+        -- Modal Tools
+        local has_sel = (doc.selected_face_idx ~= nil)
+        if not has_sel then ig.begin_disabled(true) end
+        if ig.button("Extrude (E)") then
+            local mx, my = rl.get_mouse_pos()
+            doc.start_extrude(mx, my)
+        end
+        ig.same_line()
+        if ig.button("Move (G)") then
+            local mx, my = rl.get_mouse_pos()
+            doc.start_move(mx, my)
+        end
+        if not has_sel then ig.end_disabled() end
+
+        ig.same_line()
+        ig.text_colored("|", 0.4, 0.4, 0.45, 1.0)
+        ig.same_line()
+
+        -- Undo / Redo (canvas stack in 2D mode, mesh stack otherwise)
+        local canvas_mode = (doc.mode == 5)
+        local can_u = canvas_mode
+            and (doc.canvas.tex_id ~= nil and lp.tex.can_undo(doc.canvas.tex_id))
+            or undo.can_undo()
+        if not can_u then ig.begin_disabled(true) end
+        if ig.button("Undo") then
+            if canvas_mode then doc.canvas_undo() else doc.perform_undo() end
+        end
+        if not can_u then ig.end_disabled() end
+
+        ig.same_line()
+        local can_r = canvas_mode
+            and (doc.canvas.tex_id ~= nil and lp.tex.can_redo(doc.canvas.tex_id))
+            or undo.can_redo()
+        if not can_r then ig.begin_disabled(true) end
+        if ig.button("Redo") then
+            if canvas_mode then doc.canvas_redo() else doc.perform_redo() end
+        end
+        if not can_r then ig.end_disabled() end
+
+        ig.same_line()
+        ig.text_colored("|", 0.4, 0.4, 0.45, 1.0)
+        ig.same_line()
+
+        -- Export OBJ
+        if ig.button("Export OBJ") then
+            doc.export_obj("build/cubeforge_model.obj")
+        end
+    end)
+
+    -- 2. In-Flight Modal Floating HUD Badge
+    if doc.action then
+        local hud_text
+        if doc.action == "extrude" then
+            local dist = (doc.action_data and doc.action_data.dist) or 0.0
+            hud_text = string.format("EXTRUDE: %+.2fm  |  L-Click / Enter: Confirm  ·  R-Click / Esc: Cancel", dist)
+        elseif doc.action == "move" then
+            hud_text = "MOVE (View Plane)  |  L-Click / Enter: Confirm  ·  R-Click / Esc: Cancel"
+        end
+
+        if hud_text then
+            local badge_w = 540
+            ig.set_next_window_pos((vp_w - badge_w) * 0.5, 62)
+            ig.set_next_window_size(badge_w, 36)
+            ig.set_next_window_bg_alpha(0.95)
+            ig.window("##modal_hud", tb_flags, function()
+                ig.text_colored(hud_text, 0.96, 0.65, 0.12, 1.0)
+            end)
+        end
+    end
+
+    -- 3. Right Properties & Tools Side Panel
+    -- Resizable via a drag strip on its left edge (Godot-inspector style);
+    -- the strip shows a resize cursor + amber highlight when hovered, so the
+    -- hitbox is discoverable (hover-affordance doctrine).
+    local panel_w = sidebar_w
+    local strip_l = sw - panel_w - 8
+    local mx, my = rl.get_mouse_pos()
+    local on_strip = mx >= strip_l and mx <= sw - panel_w + 2
+    -- Latch: once the drag starts on the strip, keep resizing while held,
+    -- even if the cursor leaves the thin hitbox (standard resize-handle UX).
+    if on_strip and rl.is_mouse_button_pressed(rl.MOUSE_LEFT) then
+        CF.resize_active = true
+    end
+    if not rl.is_mouse_button_down(rl.MOUSE_LEFT) then
+        CF.resize_active = false
+    end
+    if CF.resize_active then
+        rl.set_mouse_cursor(rl.CURSOR_RESIZE_EW)
+        local dx, dy = rl.get_mouse_delta()
+        sidebar_w = clamp(sidebar_w - dx, 200, 640)
+    elseif on_strip then
+        rl.set_mouse_cursor(rl.CURSOR_RESIZE_EW)
+    else
+        rl.set_mouse_cursor(rl.CURSOR_DEFAULT)  -- don't leave the resize cursor stuck
+    end
+    panel_w = sidebar_w
+    -- Highlight the strip while hovered/dragging (visual affordance)
+    if on_strip then
+        local dl = ig.get_foreground_draw_list()
+        ig.dl_add_rect_filled(dl, sw - panel_w - 4, 0, sw - panel_w + 2, sh, 0.96, 0.65, 0.12, 0.85)
+    end
+    ig.set_next_window_pos(sw - panel_w, 0)
+    ig.set_next_window_size(panel_w, sh)
+    ig.set_next_window_bg_alpha(0.96)
+
+    ig.window("##sidebar", 1 + 2 + 32, function()
+        ig.text_colored("CubeForge 2D+3D", 0.96, 0.65, 0.12, 1.0)
+        ig.same_line()
+        ig.text_colored("v1.0", 0.5, 0.5, 0.55, 1.0)
+        ig.same_line(panel_w - 118)
+        ig.text_colored("║ drag edge", 0.45, 0.47, 0.52, 1.0)
+        ig.separator()
+
+        -- Selection Mode Pills (1..4 = 3D, 5 = 2D texture paint)
+        ig.text("Selection Mode:")
+        local mode_names = { "1: Vertex", "2: Edge", "3: Face", "4: Paint", "5: Texture Paint" }
+        for m = 1, 5 do
+            if m > 1 and m < 5 then ig.same_line() end  -- pill 5 wraps to its own row
+            local is_active = (doc.mode == m)
+            if is_active then
+                ig.push_style_color(ig.col.Button, 0.85, 0.55, 0.12, 1.0)
+                ig.push_style_color(ig.col.Text, 0.1, 0.1, 0.12, 1.0)
+            end
+            if ig.button(mode_names[m]) then
+                set_mode(m)
+            end
+            if is_active then
+                ig.pop_style_color(2)
+            end
+        end
+
+        ig.separator()
+
+        -- Geometry Actions
+        ig.text("Actions:")
+        local has_sel = (doc.selected_face_idx ~= nil)
+        if not has_sel then ig.begin_disabled(true) end
+        if ig.button("Extrude (E)", 120, 28) then
+            local mx, my = rl.get_mouse_pos()
+            doc.start_extrude(mx, my)
+        end
+        ig.same_line()
+        if ig.button("Move (G)", 120, 28) then
+            local mx, my = rl.get_mouse_pos()
+            doc.start_move(mx, my)
+        end
+        if not has_sel then ig.end_disabled() end
+
+        ig.separator()
+
+        -- Vertex Painting Settings
+        ig.text("Vertex Paint Brush:")
+        local r_chg, new_rad = ig.slider_float("Radius##brush", doc.brush.radius, 0.2, 4.0)
+        if r_chg then doc.brush.radius = new_rad end
+
+        local s_chg, new_str = ig.slider_float("Strength##brush", doc.brush.strength, 0.1, 1.0)
+        if s_chg then doc.brush.strength = new_str end
+
+        local h_chg, new_hard = ig.slider_float("Hardness##brush", doc.brush.hardness, 0.0, 1.0)
+        if h_chg then doc.brush.hardness = new_hard end
+
+        local bc = doc.brush.color
+        local col_norm = { (bc[1] or 240) / 255.0, (bc[2] or 120) / 255.0, (bc[3] or 50) / 255.0 }
+        local c_chg, new_c = ig.color_edit3("Color##brush", col_norm[1], col_norm[2], col_norm[3])
+        if c_chg then
+            doc.brush.color = {
+                math.floor(new_c[1] * 255 + 0.5),
+                math.floor(new_c[2] * 255 + 0.5),
+                math.floor(new_c[3] * 255 + 0.5),
+            }
+        end
+
+        ig.separator()
+
+        -- 2D Texture Canvas (mode 5): live preview + stroke controls.
+        -- The preview draws the GPU texture via the window draw list.
+        ig.text("2D Texture Canvas:")
+        if doc.canvas.tex_id then
+            local tid = doc.canvas.tex_id
+            local gl_id = lp.tex.texture_id(tid)
+            local pw = panel_w - 16
+            ig.child("##canvas_preview", pw, 122, 0, function()
+                local wx, wy = ig.get_window_pos()
+                local cx, cy = ig.get_cursor_pos()
+                local dl = ig.get_window_draw_list()
+                local size = 108
+                local px = wx + cx + (pw - size) * 0.5
+                local py = wy + cy + 4
+                ig.dl_add_image(dl, gl_id, px, py, px + size, py + size, 0, 0, 1, 1)
+                ig.dl_add_rect(dl, px - 1, py - 1, px + size + 1, py + size + 1,
+                    0.85, 0.65, 0.2, 1.0, 0.0, 1.5)
+            end)
+            ig.text_colored("Texture → Cube (2D↔3D)", 0.95, 0.7, 0.2, 1.0)
+            ig.text_colored("Drop · Ctrl+V · Open — import an image", 0.6, 0.65, 0.7, 1.0)
+            if ig.button("Load Texture…") then
+                local path = lp.app.open_file_dialog()
+                if path then
+                    import_image(path)
+                else
+                    doc.status_msg = "Open: no file chosen"
+                end
+            end
+            ig.same_line()
+            if ig.button("Clear Canvas") then doc.canvas_clear() end
+            if ig.button("Canvas Undo") then doc.canvas_undo() end
+            ig.same_line()
+            if ig.button("Canvas Redo") then doc.canvas_redo() end
+        else
+            ig.text_colored("Canvas created on first 3D frame", 0.5, 0.5, 0.55, 1.0)
+        end
+
+        ig.separator()
+
+        -- Scene Hierarchy & Stats
+        ig.text("Scene Summary:")
+        local total_verts = 0
+        local total_faces = 0
+        for _, m in ipairs(doc.meshes) do
+            total_verts = total_verts + #m.verts
+            total_faces = total_faces + #m.faces
+        end
+        ig.text(string.format("  Objects: %d", #doc.meshes))
+        ig.text(string.format("  Vertices: %d", total_verts))
+        ig.text(string.format("  Faces: %d", total_faces))
+
+        local active_m = doc.get_active_mesh()
+        if active_m then
+            ig.text(string.format("  Active: %s", active_m.name or "Mesh"))
+            if doc.selected_face_idx then
+                ig.text_colored(string.format("  Selected Face: #%d", doc.selected_face_idx), 0.95, 0.7, 0.2, 1.0)
+            else
+                ig.text_colored("  No face selected", 0.55, 0.55, 0.6, 1.0)
+            end
+        end
+
+        ig.separator()
+
+        -- Hotkey Reference Card
+        ig.text("Hotkey Reference:")
+        ig.text_colored("  E", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Extrude face")
+        ig.text_colored("  G", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Move in view plane")
+        ig.text_colored("  1/2/3", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Vert / Edge / Face")
+        ig.text_colored("  4 / B", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Paint mode")
+        ig.text_colored("  5", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Texture Paint (2D)")
+        ig.text_colored("  Ctrl+Z", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Undo")
+        ig.text_colored("  Ctrl+Y", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Redo")
+        ig.text_colored("  Ctrl+E", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Export OBJ")
+        ig.text_colored("  MMB", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Tilt / Orbit")
+        ig.text_colored("  Shift+MMB", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("3D Pan")
+        ig.text_colored("  RMB", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Fly (WASD/QE)")
+        ig.text_colored("  Wheel", 0.95, 0.7, 0.2, 1.0); ig.same_line(70); ig.text("Zoom / Dolly")
+
+        ig.separator()
+        ig.text_colored(doc.status_msg or "", 0.7, 0.75, 0.8, 1.0)
+    end)
+end
+
+-- Global handle for drive assertions (CF.cam2d / CF.doc)
+CF = { cam = cam, cam2d = cam2d, doc = doc, sidebar = function() return sidebar_w end, import = import_image }
