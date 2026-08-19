@@ -86,10 +86,12 @@ The optimal, highest-velocity agentic coding configuration for building native t
 
 ### 2. Multi-Model Tiered Delegation
 For maximum quality and safety, combine models with complementary strengths:
-- **Primary Builder (`Gemini 3.7 Flash`)**: Scaffolding, feature implementation, UI panel layout, mathematical kernels, and input drive scripts.
-- **Adversarial Reviewer (`Claude Opus 4.6` or `DeepSeek V4 Flash`)**: One-shot post-implementation audits, ABI boundary validation, and Undefined Behavior checks.
-- **Vision Validator (`Qwen 3.7 Flash`)**: Automated visual smoke test verification of offscreen screenshots (`--shot`) and drive tapes.
-
+- **Primary Builder (`Gemini 3.7 Flash`)**: High-velocity builder for scaffolding, feature implementation, UI panel layout, mathematical kernels, and input drive tapes. Free within Google AI Pro subscription quota with near-instant generation speed.
+- **Adversarial Reviewers**:
+  - **`GLM-5.3` (Best Overall Adversarial Reviewer)**: Top-tier systems reasoning and deep graphics debugging capabilities (empirically proven by solving the complex Windows OpenGL 3.3 drag-resize modal loop subclassing and dt trap without needing a separate D3D11 backend).
+  - **`Claude Opus 4.6` (Best In-Plan Reviewer)**: Convenient choice when operating on a Google AI Pro subscription because it includes bundled Opus 4.6 quota under the same plan; exceptional at multi-file architecture audits and C++ template reasoning.
+  - **`DeepSeek V4 Flash` (Best Value High-Capability Reviewer)**: Ultra-cost-effective (~$0.20/M tokens) and highly capable reviewer accessed directly via the DeepSeek API, ideal for independent parallel debugging sessions and ABI audits.
+- **Vision Validator (`Qwen 3.7 Flash`)**: Automated visual smoke test verification of offscreen screenshots (`--shot`) and input drive tapes (`--drive`).
 ---
 
 ## 🚀 Quickstart: Scaffolding a New Native Project

@@ -61,20 +61,23 @@ The `make test` gate runs four test suites in order. All must pass:
 
 ### Current Model Routing
 - **Primary builder**: Gemini 3.7 Flash (via `google-antigravity` OAuth, free with AI Pro subscription). Handles scaffolding, feature implementation, and iterative refinement. Cheap enough for long multi-turn sessions.
-- **Adversarial reviewer**: Claude Opus 4.6 or DeepSeek V4 Flash via `omp --model`. Used for one-shot adversarial code review of completed work.
+- **Adversarial reviewers**:
+  - **GLM-5.3**: Best overall adversarial reviewer — diagnosed and implemented the Windows OpenGL 3.3 drag-resize subclass and solved the subtle `GetFrameTime()` dt trap.
+  - **Claude Opus 4.6**: Best frictionless in-plan reviewer when operating on a Gemini AI Pro plan (utilizing bundled Opus 4.6 quota).
+  - **DeepSeek V4 Flash**: Best value high-capability API reviewer (~$0.20/M tokens) for independent parallel auditing sessions.
 - **Vision**: Qwen 3.7 Flash (OpenRouter, ~$0.03/1M input tokens) for screenshot inspection of `--shot` output.
 
-### When to Offload to Opus or DeepSeek V4
+### When to Offload to Reviewers
 Gemini Flash is sufficient for ~80% of the work (Lua feature code, panel layout, theme tuning, basic 3D math). Offload to a stronger model when:
 
 | Trigger | Target Model | Mechanism |
 |---|---|---|
-| **Adversarial review** of completed template/app | Opus 4.6 or DeepSeek V4 | `omp --model google-antigravity/claude-opus-4-6` (or `deepseek/deepseek-v4-flash`) in a new session, pointed at the repo |
-| **C++ binding layer changes** (ig.cpp, lua.cpp) | Opus 4.6 | C++ template metaprogramming, ABI reasoning, UB detection |
-| **Cross-platform debugging** (Windows/Wine failures) | DeepSeek V4 | Cheap enough for iterative debugging; strong systems knowledge |
-| **Architecture decisions** (new template design, skill restructuring) | Opus 4.6 | Better at multi-file reasoning and taste |
-| **3D math / projection bugs** | Either | Matrix algebra, winding order, projection correctness |
-
+| **Deep systems / graphics debugging** (modal resize, WGL) | GLM-5.3 | Deep systems and graphics pipeline reasoning |
+| **Adversarial review** of completed template/app | Opus 4.6, GLM-5.3, or DeepSeek V4 | `omp --model <model>` in a new session, pointed at the repo |
+| **C++ binding layer changes** (ig.cpp, lua.cpp) | Opus 4.6 or GLM-5.3 | C++ template metaprogramming, ABI reasoning, UB detection |
+| **Cross-platform debugging** (Windows/Wine failures) | DeepSeek V4 or GLM-5.3 | Cost-effective for iterative debugging; strong systems knowledge |
+| **Architecture decisions** (new template design, skill restructuring) | Opus 4.6 | Multi-file reasoning and taste |
+| **3D math / projection bugs** | Any reviewer | Matrix algebra, winding order, projection correctness |
 ### Can Gemini Spawn Opus/DeepSeek Autonomously?
 **Yes — `omp -p` (non-interactive) mode works (verified 2026-08-19)**:
 ```sh
