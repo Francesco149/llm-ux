@@ -470,8 +470,15 @@ void register_lua_bindings(lua_State* L, const char* backend_name) {
     lua_pushcfunction(L, l_app_resolve_asset);
     lua_setfield(L, -2, "resolve_asset");
 
-    lua_pushstring(L, backend_name ? backend_name : "Unknown");
+    static std::string s_backend_name;
+    s_backend_name = backend_name ? backend_name : "Unknown";
+    lua_pushstring(L, s_backend_name.c_str());
     lua_setfield(L, -2, "backend_name");
+    lua_pushcfunction(L, [](lua_State* L) -> int {
+        lua_pushstring(L, s_backend_name.c_str());
+        return 1;
+    });
+    lua_setfield(L, -2, "get_backend_name");
 
     lua_setfield(L, -2, "app");
     lua_pop(L, 1); // pop lp

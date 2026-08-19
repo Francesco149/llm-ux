@@ -808,7 +808,8 @@ function lp_frame()
     local max_sidebar = math.max(180, sw - 120)
     local panel_w = math.max(180, math.min(sidebar_w, max_sidebar))
     local vp_w = math.max(60, sw - panel_w)
-    local tb_w = math.min(540, vp_w - 16)
+    local is_compact = (vp_w < 780)
+    local tb_w = is_compact and math.min(500, vp_w - 16) or math.min(760, vp_w - 16)
     local tb_h = 42
     local tb_x = math.max(8, (vp_w - tb_w) * 0.5)
     ig.set_next_window_pos(tb_x, 12)
@@ -821,7 +822,8 @@ function lp_frame()
             doc.add_box()
         end
         ig.same_line()
-        if ig.button(ic("CYLINDER", "+") .. "Cylinder") then
+        local cyl_label = is_compact and (ic("CYLINDER", "+") .. "Cyl") or (ic("CYLINDER", "+") .. "Cylinder")
+        if ig.button(cyl_label) then
             doc.add_cylinder()
         end
 
@@ -836,7 +838,8 @@ function lp_frame()
             or (doc.selected_face_idx ~= nil)
 
         if not can_extrude then ig.begin_disabled(true) end
-        if ig.button(ic("EXTRUDE", "") .. "Extrude (E)") then
+        local ext_label = is_compact and (ic("EXTRUDE", "") .. "Ext") or (ic("EXTRUDE", "") .. "Extrude (E)")
+        if ig.button(ext_label) then
             local mx, my = rl.get_mouse_pos()
             doc.start_extrude(mx, my)
         end
@@ -844,7 +847,8 @@ function lp_frame()
 
         ig.same_line()
         if not can_move then ig.begin_disabled(true) end
-        if ig.button(ic("MOVE", "") .. "Move (G)") then
+        local move_label = is_compact and (ic("MOVE", "") .. "Move") or (ic("MOVE", "") .. "Move (G)")
+        if ig.button(move_label) then
             local mx, my = rl.get_mouse_pos()
             doc.start_move(mx, my)
         end
@@ -879,7 +883,8 @@ function lp_frame()
         ig.same_line()
 
         -- Export OBJ
-        if ig.button(ic("EXPORT", "") .. "Export OBJ") then
+        local exp_label = is_compact and (ic("EXPORT", "") .. "OBJ") or (ic("EXPORT", "") .. "Export OBJ")
+        if ig.button(exp_label) then
             doc.export_obj("build/cubeforge_model.obj")
         end
     end)
@@ -1171,7 +1176,16 @@ function lp_frame()
         end
         avg_ms = #frame_history > 0 and (avg_ms / #frame_history) or frame_ms
 
-        local b_name = (lp.app and lp.app.backend_name and lp.app.backend_name()) or "OpenGL / D3D"
+        local b_name = "OpenGL / D3D"
+        if lp.app then
+            if type(lp.app.backend_name) == "string" then
+                b_name = lp.app.backend_name
+            elseif type(lp.app.backend_name) == "function" then
+                b_name = lp.app.backend_name()
+            elseif type(lp.app.get_backend_name) == "function" then
+                b_name = lp.app.get_backend_name()
+            end
+        end
         local m_count = #doc.meshes
         local total_verts, total_faces = 0, 0
         for _, m in ipairs(doc.meshes) do

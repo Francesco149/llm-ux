@@ -12,8 +12,8 @@ local doc = require("doc")
 -- 1. Right-drag orbit from screen center to the left by 160px over 12 frames.
 D.drag(2, 640, 400, 480, 400, 12, 2)   -- btn 2 = middle: tilt camera
 
--- 2. Click "+ Cylinder" button on the top toolbar at (315, 24) on frame 18
-D.click(18, 315, 24, 0)
+-- 2. Click "+ Cylinder" button on the top toolbar at (240, 24) on frame 18
+D.click(18, 240, 24, 0)
 
 -- 3. Start Extrude (E) on frame 24
 D.tap(24, D.Key.E)
