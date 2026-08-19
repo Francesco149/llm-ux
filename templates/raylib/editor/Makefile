@@ -118,7 +118,7 @@ WIN_D3D11_CXXFLAGS := -std=c++17 -O2 -g -Wall -Wno-unknown-pragmas \
   -DWINVER=0x0601 -D_WIN32_WINNT=0x0601 -DUNICODE -D_UNICODE
 
 WIN_D3D11_LIBS := -ld3d11 -ldxgi -ld3dcompiler -lgdi32 -luser32 -lshell32 -lole32 \
-  -ldwmapi -lcomdlg32 -Wl,-Bstatic -lmcfgthread -Wl,-Bdynamic
+  -ldwmapi -lcomdlg32 -lwinmm -Wl,-Bstatic -lmcfgthread -Wl,-Bdynamic
 
 D3D11_SRC_OBJS := $(WIN_D3D11_OBJ)/main_d3d11.o $(WIN_D3D11_OBJ)/ig.o $(WIN_D3D11_OBJ)/winclip.o \
   $(WIN_D3D11_OBJ)/imgui.o $(WIN_D3D11_OBJ)/imgui_draw.o $(WIN_D3D11_OBJ)/imgui_tables.o \

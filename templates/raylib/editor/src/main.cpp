@@ -319,6 +319,24 @@ static int l_rl_set_window_size(lua_State* L) {
     if (w > 0 && h > 0) SetWindowSize(w, h);
     return 0;
 }
+static int l_rl_set_target_fps(lua_State* L) {
+    int fps = (int)luaL_checkinteger(L, 1);
+    SetTargetFPS(fps);
+    return 0;
+}
+
+static int l_rl_get_target_fps(lua_State* L) {
+    lua_pushinteger(L, GetFPS());
+    return 1;
+}
+
+static int l_rl_get_monitor_refresh_rate(lua_State* L) {
+    int mon = (int)luaL_optinteger(L, 1, GetCurrentMonitor());
+    int hz = GetMonitorRefreshRate(mon);
+    lua_pushinteger(L, hz > 0 ? hz : 60);
+    return 1;
+}
+
 
 static int l_rl_get_monitor_size(lua_State* L) {
     int mon = (int)luaL_optinteger(L, 1, GetCurrentMonitor());
@@ -1253,6 +1271,9 @@ static void rl_register(lua_State* L) {
     RR(take_screenshot);
     RR(set_lighting_enabled);
     RR(is_lighting_enabled);
+    RR(set_target_fps);
+    RR(get_target_fps);
+    RR(get_monitor_refresh_rate);
     RR(get_clipboard_text);
     RR(clipboard_file_path);
     RR(is_file_dropped);
@@ -1687,7 +1708,7 @@ int main(int argc, char** argv) {
     if (headless) cfg |= FLAG_WINDOW_HIDDEN;  // render without stealing focus
     SetConfigFlags(cfg);
     InitWindow(req_w, req_h, "CubeForge — Raylib + ImGui + Lua");
-    SetTargetFPS(60);
+    SetTargetFPS(0); // Unlocked / synchronized to monitor native refresh rate (e.g. 240Hz)
 
     // Guard against negative window positions or monitor bounds overflow (e.g. 800x600 displays):
     if (!headless) {

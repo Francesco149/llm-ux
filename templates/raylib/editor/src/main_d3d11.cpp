@@ -10,6 +10,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
+#include <mmsystem.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
 #include <d3dcompiler.h>
@@ -249,6 +250,7 @@ static int                      g_win_h = 800;
 static bool                     g_in_render = false;
 static bool                     g_in_sizemove = false;
 static double                   g_last_frame_time = 0.016;
+static int                      g_target_fps = 0; // 0 = VSync (240Hz default)
 
 // ── D3D11 Vertex Struct ─────────────────────────────────────────────────────
 struct D3DVertex {
@@ -1439,8 +1441,22 @@ static int l_rl_set_mouse_cursor(lua_State* L) {
         default: cur = IDC_ARROW; break;
     }
     g_current_cursor = LoadCursor(nullptr, cur);
-    SetCursor(g_current_cursor);
     return 0;
+}
+
+static int l_rl_set_target_fps(lua_State* L) {
+    g_target_fps = (int)luaL_checkinteger(L, 1);
+    return 0;
+}
+
+static int l_rl_get_target_fps(lua_State* L) {
+    lua_pushinteger(L, g_target_fps);
+    return 1;
+}
+
+static int l_rl_get_monitor_refresh_rate(lua_State* L) {
+    lua_pushinteger(L, 240);
+    return 1;
 }
 
 
@@ -1731,6 +1747,9 @@ static void rl_register(lua_State* L) {
     RR(draw_cylinder_wires);
     RR(draw_triangle_3d);
     RR(load_shader);
+    RR(set_target_fps);
+    RR(get_target_fps);
+    RR(get_monitor_refresh_rate);
     RR(unload_shader);
     RR(set_material_shader);
     RR(set_material_color);
@@ -2621,9 +2640,9 @@ static void app_render_frame() {
     g_d3d_context->OMSetRenderTargets(1, &g_main_rtv, g_depth_stencil_view);
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
-    // 4. DXGI Flip Model Present
-    g_swapchain->Present(1, 0);
-
+    // 4. DXGI Flip Model Present: sync interval 1 for VSync, or 0 when using CPU frame limiter
+    UINT sync_interval = (g_target_fps <= 0) ? 1 : 0;
+    g_swapchain->Present(sync_interval, 0);
     g_in_render = false;
 }
 
@@ -2875,11 +2894,14 @@ int main(int argc, char** argv) {
         UpdateWindow(g_hwnd);
     }
 
+    timeBeginPeriod(1);
     auto prev_time = std::chrono::high_resolution_clock::now();
     int frame = 0;
     bool running = true;
 
     while (running) {
+        auto frame_start = std::chrono::high_resolution_clock::now();
+
         MSG msg;
         while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT) {
@@ -2908,6 +2930,16 @@ int main(int argc, char** argv) {
 
         if (drive_loaded) lp_call_global("drive_frame");
 
+        if (g_target_fps > 0) {
+            double target_sec = 1.0 / (double)g_target_fps;
+            auto target_deadline = frame_start + std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(target_sec));
+            while (std::chrono::high_resolution_clock::now() < target_deadline) {
+                auto rem = std::chrono::duration_cast<std::chrono::milliseconds>(target_deadline - std::chrono::high_resolution_clock::now()).count();
+                if (rem > 2) Sleep((DWORD)(rem - 1));
+                else YieldProcessor();
+            }
+        }
+
         if (headless && frame >= shot_frames) {
             lua_pushstring(L_global, shot_path);
             l_rl_take_screenshot(L_global);
@@ -2917,6 +2949,7 @@ int main(int argc, char** argv) {
         }
     }
 
+    timeEndPeriod(1);
     lua_shutdown();
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();

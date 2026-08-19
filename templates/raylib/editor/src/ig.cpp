@@ -849,6 +849,30 @@ static int l_end_tooltip(lua_State* L) {
   return 0;
 }
 
+static int l_plot_lines(lua_State* L) {
+  const char* label = luaL_checkstring(L, 1);
+  luaL_checktype(L, 2, LUA_TTABLE);
+  int count = (int)luaL_optinteger(L, 3, (lua_Integer)lua_rawlen(L, 2));
+  float scale_min = (float)luaL_optnumber(L, 4, 0.0);
+  float scale_max = (float)luaL_optnumber(L, 5, 0.0);
+  float gw = (float)luaL_optnumber(L, 6, 0.0);
+  float gh = (float)luaL_optnumber(L, 7, 40.0);
+  const char* overlay = luaL_optstring(L, 8, nullptr);
+
+  if (count <= 0) return 0;
+  std::vector<float> vals(count);
+  for (int i = 0; i < count; i++) {
+    lua_rawgeti(L, 2, i + 1);
+    vals[i] = (float)lua_tonumber(L, -1);
+    lua_pop(L, 1);
+  }
+  ImGui::PlotLines(label, vals.data(), count, 0, overlay,
+                   scale_min == 0.0f && scale_max == 0.0f ? FLT_MAX : scale_min,
+                   scale_min == 0.0f && scale_max == 0.0f ? FLT_MAX : scale_max,
+                   ImVec2(gw, gh));
+  return 0;
+}
+
 // ── draw list ───────────────────────────────────────────────────────────────
 
 static int push_dl(lua_State* L, ImDrawList* dl) {
@@ -1301,6 +1325,7 @@ void ig_register(lua_State* L) {
   REG(begin_tooltip);
   REG(end_tooltip);
   REG(get_window_draw_list);
+  REG(plot_lines);
   REG(get_foreground_draw_list);
   REG(dl_add_image);
   REG(dl_add_rect_filled);

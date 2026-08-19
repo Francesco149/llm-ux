@@ -45,6 +45,16 @@ local cam2d = { pan = { 256, 256 }, zoom = 1.0 }
 local sidebar_w = 280
 local show_perf_hud = false
 local fps_smooth = 60.0
+local frame_history = {}
+local fps_limit_idx = 1
+local FPS_LIMITS = {
+    { label = "VSync", fps = 0 },
+    { label = "240 FPS", fps = 240 },
+    { label = "144 FPS", fps = 144 },
+    { label = "120 FPS", fps = 120 },
+    { label = "60 FPS", fps = 60 },
+    { label = "Unlimited", fps = -1 },
+}
 local function sync_cam2d()
     lp.cam2d.set(cam2d.pan[1], cam2d.pan[2], cam2d.zoom)
 end
@@ -1054,6 +1064,22 @@ function lp_frame()
             if lp.rl.set_lighting_enabled then lp.rl.set_lighting_enabled(doc.lighting_enabled) end
         end
 
+        ig.text("Frame Rate Limit:")
+        for idx, opt in ipairs(FPS_LIMITS) do
+            if idx == 2 or idx == 4 or idx == 6 then ig.same_line() end
+            local active = (fps_limit_idx == idx)
+            if active then
+                ig.push_style_color(ig.col.Button, 0.96, 0.65, 0.12, 0.9)
+                ig.push_style_color(ig.col.Text, 0.1, 0.1, 0.1, 1.0)
+            end
+            if ig.button(opt.label .. "##fps", 124, 24) then
+                fps_limit_idx = idx
+                if rl.set_target_fps then rl.set_target_fps(opt.fps) end
+            end
+            if active then
+                ig.pop_style_color(2)
+            end
+        end
         ig.separator()
 
         -- Scene Hierarchy & Stats
@@ -1121,6 +1147,20 @@ function lp_frame()
         fps_smooth = fps_smooth + (instant_fps - fps_smooth) * math.min(1.0, math.max(0.01, dt * 10.0))
         local frame_ms = dt * 1000.0
 
+        -- Push into rolling 120-sample buffer
+        frame_history[#frame_history + 1] = frame_ms
+        if #frame_history > 120 then
+            table.remove(frame_history, 1)
+        end
+
+        local min_ms, max_ms, avg_ms = 999.0, 0.0, 0.0
+        for _, v in ipairs(frame_history) do
+            if v < min_ms then min_ms = v end
+            if v > max_ms then max_ms = v end
+            avg_ms = avg_ms + v
+        end
+        avg_ms = #frame_history > 0 and (avg_ms / #frame_history) or frame_ms
+
         local b_name = (lp.app and lp.app.backend_name and lp.app.backend_name()) or "OpenGL / D3D"
         local m_count = #doc.meshes
         local total_verts, total_faces = 0, 0
@@ -1129,8 +1169,8 @@ function lp_frame()
             total_faces = total_faces + #(m.faces or {})
         end
 
-        ig.set_next_window_pos(12, sh - 114)
-        ig.set_next_window_size(300, 102)
+        ig.set_next_window_pos(12, sh - 172)
+        ig.set_next_window_size(320, 160)
         ig.set_next_window_bg_alpha(0.88)
         local hud_flags = 1 + 2 + 32 + 64 -- NoTitleBar | NoResize | NoSavedSettings | NoFocusOnAppearing
         ig.window("##perf_hud", hud_flags, function()
@@ -1140,17 +1180,23 @@ function lp_frame()
             ig.text_colored(string.format("%.1f FPS (%.2f ms)", fps_smooth, frame_ms), fps_col[1], fps_col[2], fps_col[3], 1.0)
             ig.separator()
 
+            -- Frame time rolling sparkline graph
+            if #frame_history >= 2 and ig.plot_lines then
+                ig.plot_lines("##ft_graph", frame_history, #frame_history, 0.0, 20.0, 304, 38,
+                    string.format("min: %.1f | avg: %.1f | max: %.1f ms", min_ms, avg_ms, max_ms))
+            end
+
             ig.text_colored("Backend:", 0.55, 0.6, 0.65, 1.0)
             ig.same_line()
             ig.text_colored(b_name, 0.4, 0.8, 1.0, 1.0)
 
-            ig.text_colored(string.format("Res: %dx%d | Meshes: %d (%d v, %d f)", sw, sh, m_count, total_verts, total_faces), 0.75, 0.78, 0.82, 1.0)
+            local cur_limit = FPS_LIMITS[fps_limit_idx] and FPS_LIMITS[fps_limit_idx].label or "Native"
+            ig.text_colored(string.format("Res: %dx%d | Limit: %s", sw, sh, cur_limit), 0.75, 0.78, 0.82, 1.0)
 
             local light_str = doc.lighting_enabled and "3D Sun Light" or "Unlit Diffuse"
             ig.text_colored(string.format("Light: %s | Spacing: %.2f", light_str, doc.brush.spacing or 0.20), 0.65, 0.68, 0.72, 1.0)
         end)
     end
-
 end
 
 -- Global handle for drive assertions (CF.cam2d / CF.doc)

@@ -72,6 +72,10 @@ ok(type(rl.set_window_position) == "function", "rl.set_window_position")
 ok(type(rl.get_window_position) == "function", "rl.get_window_position")
 ok(type(rl.set_lighting_enabled) == "function", "rl.set_lighting_enabled")
 ok(type(rl.is_lighting_enabled) == "function", "rl.is_lighting_enabled")
+ok(type(rl.set_target_fps) == "function", "rl.set_target_fps")
+ok(type(rl.get_target_fps) == "function", "rl.get_target_fps")
+ok(type(rl.get_monitor_refresh_rate) == "function", "rl.get_monitor_refresh_rate")
+ok(type(ig.plot_lines) == "function", "ig.plot_lines")
 
 -- Behavior: canvas create → white; stamp paints; undo restores; export writes.
 local tid = tex.create(64, 64)
