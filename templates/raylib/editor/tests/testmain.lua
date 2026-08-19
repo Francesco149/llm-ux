@@ -66,6 +66,10 @@ ok(type(rl.load_model_mesh) == "function", "rl.load_model_mesh")
 ok(type(rl.set_mouse_cursor) == "function", "rl.set_mouse_cursor")
 ok(rl.CURSOR_RESIZE_EW ~= nil, "rl.CURSOR_RESIZE_EW constant")
 ok(rl.CURSOR_HAND ~= nil, "rl.CURSOR_HAND constant")
+ok(type(rl.set_window_size) == "function", "rl.set_window_size")
+ok(type(rl.get_monitor_size) == "function", "rl.get_monitor_size")
+ok(type(rl.set_window_position) == "function", "rl.set_window_position")
+ok(type(rl.get_window_position) == "function", "rl.get_window_position")
 
 -- Behavior: canvas create → white; stamp paints; undo restores; export writes.
 local tid = tex.create(64, 64)
@@ -310,6 +314,19 @@ ok(p_seg < 1e-5, "dist_point_to_segment zero for point on segment")
 -- Centroid calculation
 local c_top = geom.calc_face_centroid(test_box.verts, test_box.faces[3].verts)
 ok(math.abs(c_top[1]) < 1e-5 and math.abs(c_top[2] - 2.0) < 1e-5 and math.abs(c_top[3]) < 1e-5, "calc_face_centroid returns top face center (0, 2, 0)")
+
+-- 12. Low-resolution responsive layout calculations (800x600, 640x480)
+local function test_responsive_layout(sw, sh)
+    local max_sidebar = math.max(180, sw - 120)
+    local panel_w = math.max(180, math.min(280, max_sidebar))
+    local vp_w = math.max(60, sw - panel_w)
+    local tb_w = math.min(540, vp_w - 16)
+    local tb_x = math.max(8, (vp_w - tb_w) * 0.5)
+    return (tb_x >= 8) and (tb_x + tb_w <= vp_w) and (panel_w <= sw) and (vp_w > 0)
+end
+ok(test_responsive_layout(1280, 800) == true, "responsive layout at 1280x800")
+ok(test_responsive_layout(800, 600) == true, "responsive layout at 800x600")
+ok(test_responsive_layout(640, 480) == true, "responsive layout at 640x480")
 if fails > 0 then
     print(string.format("FAIL: %d checks failed", fails))
     os.exit(1)

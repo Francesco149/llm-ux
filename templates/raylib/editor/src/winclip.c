@@ -139,4 +139,16 @@ const char* win_open_file_dialog(void) {
     return result;
 }
 
+// ── Workarea & screen metrics ───────────────────────────────────────────────
+void win_get_workarea(int* out_w, int* out_h) {
+    RECT rc;
+    if (SystemParametersInfoA(SPI_GETWORKAREA, 0, &rc, 0)) {
+        if (out_w) *out_w = (int)(rc.right - rc.left);
+        if (out_h) *out_h = (int)(rc.bottom - rc.top);
+    } else {
+        if (out_w) *out_w = (int)GetSystemMetrics(SM_CXSCREEN);
+        if (out_h) *out_h = (int)GetSystemMetrics(SM_CYSCREEN);
+    }
+}
+
 #endif // _WIN32

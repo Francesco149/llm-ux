@@ -11,6 +11,7 @@
 extern "C" const char* win_clipboard_file_path(void);
 extern "C" const char* win_clipboard_text(void);
 extern "C" const char* win_open_file_dialog(void);
+extern "C" void win_get_workarea(int* out_w, int* out_h);
 #endif
 
 #include "raylib.h"
@@ -290,6 +291,36 @@ static int l_rl_get_frame_time(lua_State* L) {
 static int l_rl_get_screen_size(lua_State* L) {
     lua_pushinteger(L, GetScreenWidth());
     lua_pushinteger(L, GetScreenHeight());
+    return 2;
+}
+
+static int l_rl_set_window_size(lua_State* L) {
+    int w = (int)luaL_checkinteger(L, 1);
+    int h = (int)luaL_checkinteger(L, 2);
+    if (w > 0 && h > 0) SetWindowSize(w, h);
+    return 0;
+}
+
+static int l_rl_get_monitor_size(lua_State* L) {
+    int mon = (int)luaL_optinteger(L, 1, GetCurrentMonitor());
+    int w = GetMonitorWidth(mon);
+    int h = GetMonitorHeight(mon);
+    lua_pushinteger(L, w);
+    lua_pushinteger(L, h);
+    return 2;
+}
+
+static int l_rl_set_window_position(lua_State* L) {
+    int x = (int)luaL_checkinteger(L, 1);
+    int y = (int)luaL_checkinteger(L, 2);
+    SetWindowPosition(x, y);
+    return 0;
+}
+
+static int l_rl_get_window_position(lua_State* L) {
+    Vector2 p = GetWindowPosition();
+    lua_pushinteger(L, (int)p.x);
+    lua_pushinteger(L, (int)p.y);
     return 2;
 }
 
@@ -1144,6 +1175,10 @@ static void rl_register(lua_State* L) {
     RR(is_key_down);
     RR(get_frame_time);
     RR(get_screen_size);
+    RR(set_window_size);
+    RR(get_monitor_size);
+    RR(set_window_position);
+    RR(get_window_position);
     RR(set_mouse_cursor);
     RR(get_clipboard_text);
     RR(clipboard_file_path);
@@ -1551,11 +1586,58 @@ int main(int argc, char** argv) {
         lua_shutdown();
         return 0;
     }
+    int req_w = 1280;
+    int req_h = 800;
+#ifdef _WIN32
+    if (!headless) {
+        int work_w = 0, work_h = 0;
+        win_get_workarea(&work_w, &work_h);
+        if (work_w > 0 && work_h > 0) {
+            if (req_w > work_w - 40) req_w = work_w > 80 ? work_w - 40 : work_w;
+            if (req_h > work_h - 60) req_h = work_h > 100 ? work_h - 60 : work_h;
+            if (req_w < 640 && work_w >= 640) req_w = 640;
+            if (req_h < 480 && work_h >= 480) req_h = 480;
+        }
+    }
+#endif
+
     uint32_t cfg = FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_RESIZABLE;
     if (headless) cfg |= FLAG_WINDOW_HIDDEN;  // render without stealing focus
     SetConfigFlags(cfg);
-    InitWindow(1280, 800, "CubeForge — Raylib + ImGui + Lua");
+    InitWindow(req_w, req_h, "CubeForge — Raylib + ImGui + Lua");
     SetTargetFPS(60);
+
+    // Guard against negative window positions or monitor bounds overflow (e.g. 800x600 displays):
+    if (!headless) {
+        int mon = GetCurrentMonitor();
+        int mon_w = GetMonitorWidth(mon);
+        int mon_h = GetMonitorHeight(mon);
+        if (mon_w > 0 && mon_h > 0) {
+            int cur_w = GetScreenWidth();
+            int cur_h = GetScreenHeight();
+            if (cur_w > mon_w || cur_h > mon_h) {
+                int fit_w = (cur_w > mon_w) ? (mon_w > 40 ? mon_w - 40 : mon_w) : cur_w;
+                int fit_h = (cur_h > mon_h) ? (mon_h > 60 ? mon_h - 60 : mon_h) : cur_h;
+                SetWindowSize(fit_w, fit_h);
+            }
+            Vector2 mon_pos = GetMonitorPosition(mon);
+            Vector2 win_pos = GetWindowPosition();
+            int final_w = GetScreenWidth();
+            int final_h = GetScreenHeight();
+            int safe_x = (int)win_pos.x;
+            int safe_y = (int)win_pos.y;
+            if (safe_x < (int)mon_pos.x) {
+                safe_x = (int)mon_pos.x + std::max(0, (mon_w - final_w) / 2);
+            }
+            if (safe_y < (int)mon_pos.y) {
+                safe_y = (int)mon_pos.y + std::max(0, (mon_h - final_h) / 2);
+            }
+            if (safe_y < (int)mon_pos.y) safe_y = (int)mon_pos.y;
+            if (safe_x != (int)win_pos.x || safe_y != (int)win_pos.y) {
+                SetWindowPosition(safe_x, safe_y);
+            }
+        }
+    }
 
     setup_imgui_fonts_and_theme();  // modern dark theme + CJK/Cyrillic fonts
 

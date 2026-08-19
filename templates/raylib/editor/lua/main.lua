@@ -132,7 +132,12 @@ end
 -- paints the canvas in world space (the same world the cube lives in — the
 -- canvas is just another surface, and lp.tex.apply_to_model bridges it to 3D).
 local function handle_canvas_input(mx, my, sw, sh, io)
-    local over_ui = (mx >= sw - sidebar_w - 8) or (my <= 48 and mx >= sw * 0.5 - 280 and mx <= sw * 0.5 + 280)
+    local panel_w = math.max(180, math.min(sidebar_w, math.max(180, sw - 120)))
+    local vp_w = math.max(60, sw - panel_w)
+    local tb_w = math.min(540, vp_w - 16)
+    local tb_x = math.max(8, (vp_w - tb_w) * 0.5)
+    local over_tb = (my <= 58 and mx >= tb_x and mx <= tb_x + tb_w)
+    local over_ui = (mx >= sw - panel_w - 8) or over_tb
     if over_ui and io.want_capture_mouse then return end
 
     -- Wheel: cursor-anchored zoom (the world point under the cursor stays put).
@@ -321,8 +326,13 @@ local function handle_viewport_input()
         return
     end
 
-    -- 2. Check if mouse is over UI area (Right sidebar is 280px wide; top toolbar is 48px high)
-    local over_ui = (mx >= sw - sidebar_w - 8) or (my <= 48 and mx >= sw * 0.5 - 280 and mx <= sw * 0.5 + 280)
+    -- 2. Check if mouse is over UI area (Right sidebar & top toolbar)
+    local panel_w = math.max(180, math.min(sidebar_w, math.max(180, sw - 120)))
+    local vp_w = math.max(60, sw - panel_w)
+    local tb_w = math.min(540, vp_w - 16)
+    local tb_x = math.max(8, (vp_w - tb_w) * 0.5)
+    local over_tb = (my <= 58 and mx >= tb_x and mx <= tb_x + tb_w)
+    local over_ui = (mx >= sw - panel_w - 8) or over_tb
     if io.want_capture_mouse and over_ui then
         update_camera(dt)
         return
@@ -775,11 +785,13 @@ function lp_frame()
     end
 
     -- 1. Top Floating Pill Toolbar (Centered over 3D viewport area)
-    local panel_w = sidebar_w
-    local vp_w = sw - panel_w
-    local tb_w = 540
+    local max_sidebar = math.max(180, sw - 120)
+    local panel_w = math.max(180, math.min(sidebar_w, max_sidebar))
+    local vp_w = math.max(60, sw - panel_w)
+    local tb_w = math.min(540, vp_w - 16)
     local tb_h = 42
-    ig.set_next_window_pos((vp_w - tb_w) * 0.5, 12)
+    local tb_x = math.max(8, (vp_w - tb_w) * 0.5)
+    ig.set_next_window_pos(tb_x, 12)
     ig.set_next_window_size(tb_w, tb_h)
     ig.set_next_window_bg_alpha(0.92)
     local tb_flags = 1 + 2 + 32 -- NoTitleBar | NoResize | NoSavedSettings
@@ -878,7 +890,8 @@ function lp_frame()
     -- (Godot-inspector style). Being a real widget, the handle gets proper
     -- hover/click capture: no click-through, no highlight bleed, and the
     -- cursor resets when the pointer leaves.
-    local panel_w = sidebar_w
+    local max_sidebar = math.max(180, sw - 120)
+    local panel_w = math.max(180, math.min(sidebar_w, max_sidebar))
     ig.set_next_window_pos(sw - panel_w, 0)
     ig.set_next_window_size(panel_w, sh)
     ig.set_next_window_bg_alpha(0.96)
@@ -897,7 +910,7 @@ function lp_frame()
             CF.sp_active = (CF.sp_active or 0) + (CF.resize_active and 1 or 0)
             if CF.resize_active then
                 local dx = rl.get_mouse_delta()
-                sidebar_w = clamp(sidebar_w - dx, 200, 640)
+                sidebar_w = clamp(sidebar_w - dx, 180, math.max(180, sw - 120))
             end
             if on or CF.resize_active then
                 rl.set_mouse_cursor(rl.CURSOR_RESIZE_EW)

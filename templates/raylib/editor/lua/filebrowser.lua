@@ -41,8 +41,9 @@ end
 function fb.frame()
     if not fb.open_flag then return end
     local sw, sh = rl.get_screen_size()
-    local w, h = 500, 420
-    ig.set_next_window_pos((sw - w) * 0.5, (sh - h) * 0.5)
+    local w = math.min(500, math.max(260, sw - 32))
+    local h = math.min(420, math.max(200, sh - 32))
+    ig.set_next_window_pos(math.max(8, (sw - w) * 0.5), math.max(8, (sh - h) * 0.5))
     ig.set_next_window_size(w, h)
     ig.window("##filebrowser", 1 + 2, function()
         ig.text_colored("Open Texture — " .. fb.dir, 0.96, 0.65, 0.12, 1.0)
