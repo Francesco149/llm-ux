@@ -58,6 +58,11 @@ make -C editor shot-paint     # 2D→3D paint tape → build/shot_paint3d.png
 make -C editor shot-win-resize# window resize invariants across 5 resolutions
 ```
 
+## Automated CI/CD Nightly Releases (`.github/workflows/nightly.yml`)
+- Builds on every push to `main`/`master`, on daily schedule (03:00 UTC), and on manual `workflow_dispatch`.
+- Forces the Git tag `nightly` to `${{ github.sha }}` (`git tag -f nightly ${{ github.sha }} && git push -f origin nightly`) so the rolling release always points to the latest commit.
+- Packages and attaches `cubeforge-raylib-win64.zip` and `cubeforge-raylib-linux-x64.tar.gz` to the `nightly` release with `prerelease: true` and `make_latest: true`.
+
 ## Multi-Tier Asset & Lua Path Resolution (`src/app_paths.h`)
 Assets and Lua modules are resolved using a 6-tier hierarchy:
 1. **Environment Variables**: `CUBEFORGE_ASSETS_DIR`, `CUBEFORGE_LUA_DIR`, `FONT_LATIN`, `FONT_CJK`

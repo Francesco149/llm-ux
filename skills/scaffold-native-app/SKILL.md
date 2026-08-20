@@ -368,6 +368,38 @@ Every native Raylib + OpenGL tool MUST ship the Windows continuous resize subcla
 
 ---
 
+---
+
+## 5d. Automated CI/CD Nightly Builds & Rolling Tag Bumping
+
+Every scaffolded repository MUST ship with `.github/workflows/nightly.yml` pre-configured to build both Linux and Windows standalone packages on every push to `main`/`master`, on nightly cron, and on `workflow_dispatch`.
+
+### The Rolling Tag Stale Commit Trap & Fix:
+When using GitHub Actions release actions (`softprops/action-gh-release@v2`), if the tag `nightly` already exists on the remote, the action will NOT automatically move an existing Git tag to the latest commit. The workflow MUST explicitly force-update the Git tag to `${{ github.sha }}` and force-push prior to creating/editing the release:
+
+```yaml
+      - name: Bump Nightly Tag to Current Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f nightly ${{ github.sha }}
+          git push -f origin nightly
+
+      - name: Create or Update Nightly Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          target_commitish: ${{ github.sha }}
+          name: "<app-name> - Nightly Build"
+          prerelease: true
+          make_latest: true
+          files: |
+            build/<app-name>-win64.zip
+            build/<app-name>-linux-x64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
 ## 6. Single Template: 2D + 3D
 New scaffolds MUST be ONE raylib-only template in which **2D is a first-class
 subset of the 3D project** — there is no separate 2D template. One Raylib

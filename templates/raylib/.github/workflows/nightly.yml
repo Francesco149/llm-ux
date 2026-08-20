@@ -1,140 +1,71 @@
-# GitHub Actions Workflow for Continuous Integration & Nightly Builds
-#
-# Defaults:
-# - On every push to master/main and schedule: Builds both targets (Linux OGL,
-#   Windows OGL) and uploads downloadable artifacts to the workflow run.
-#
-# Manual Release Dispatch:
-# - Run workflow with `release: true` to automatically bump the `nightly-N` tag,
-#   publish a GitHub Release, attach both distribution ZIPs, and prune old nightlies.
-
-name: nightly
+name: Nightly Build & Release
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [ main, master ]
   schedule:
-    - cron: '0 4 * * *'
+    - cron: '0 3 * * *' # Every night at 03:00 UTC
   workflow_dispatch:
-    inputs:
-      release:
-        description: 'Publish / bump nightly release tag with downloadable ZIPs'
-        type: boolean
-        required: false
-        default: false
 
 permissions:
   contents: write
 
 jobs:
-  check:
+  build-and-release:
+    name: Build Native App & Nightly Release
     runs-on: ubuntu-latest
-    outputs:
-      make_release: ${{ steps.decide.outputs.make_release }}
-      tag: ${{ steps.decide.outputs.tag }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          fetch-tags: true
-      - id: decide
+
+      - name: Install Nix with Flakes
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Run Headless Tests & Smoke Verifications
         run: |
-          if [ "${{ github.event.inputs.release }}" = "true" ]; then
-            last=$(git tag -l 'nightly-*' | sed 's/^nightly-//' | grep -E '^[0-9]+$' | sort -n | tail -1)
-            next_tag="nightly-$(( ${last:-0} + 1 ))"
-            echo "make_release=true" >> "$GITHUB_OUTPUT"
-            echo "tag=$next_tag" >> "$GITHUB_OUTPUT"
-            echo "Creating release $next_tag"
-          else
-            echo "make_release=false" >> "$GITHUB_OUTPUT"
-            echo "Building artifacts without release publish (downloadable via workflow run)"
-          fi
+          nix develop --command make -C editor test
 
-  build-linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@v16
-      - uses: nix-community/cache-nix-action@v6
-        with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          gc-max-store-size-linux: 6G
-
-      - name: Build and Test Linux
+      - name: Build Linux Standalone Package
         run: |
-          nix develop --command make -C editor test package-linux zip-linux
+          nix develop --command make -C editor package-linux
+          tar -czf build/cubeforge-raylib-linux-x64.tar.gz -C build cubeforge-raylib-linux
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cubeforge-raylib-linux
-          path: build/cubeforge-raylib-linux.zip
-
-  build-windows:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@v16
-      - uses: nix-community/cache-nix-action@v6
-        with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-          gc-max-store-size-linux: 6G
-
-      - name: Build Windows Target (OpenGL 3.3)
+      - name: Cross-Compile Windows x64 Package
         run: |
-          nix develop --command make -C editor win package zip-win
+          nix develop --command make -C editor package
+          cd build && zip -r cubeforge-raylib-win64.zip cubeforge-raylib-win64 && cd ..
 
-      - uses: actions/upload-artifact@v4
+      - name: Bump Nightly Tag to Current Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f nightly ${{ github.sha }}
+          git push -f origin nightly
+
+      - name: Create or Update Nightly Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: cubeforge-raylib-win64
-          path: build/cubeforge-raylib-win64.zip
-
-
-  release:
-    needs: [check, build-linux, build-windows]
-    if: needs.check.outputs.make_release == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-
-      - name: Create Tag & GitHub Release
+          tag_name: nightly
+          target_commitish: ${{ github.sha }}
+          name: "cubeforge - Nightly Build"
+          body: |
+            Automated nightly build of **cubeforge** (Raylib 6.0 + Dear ImGui + Lua).
+            
+            ### Included Packages:
+            - `cubeforge-raylib-win64.zip`: Standalone portable Windows x64 release (includes runtime DLLs, vector fonts, and Lua runtime).
+            - `cubeforge-raylib-linux-x64.tar.gz`: Standalone Linux x86_64 package.
+            
+            *Built automatically from commit ${{ github.sha }} on $(date -u +'%Y-%m-%d %H:%M UTC').*
+          prerelease: true
+          make_latest: true
+          files: |
+            build/cubeforge-raylib-win64.zip
+            build/cubeforge-raylib-linux-x64.tar.gz
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.check.outputs.tag }}
-        run: |
-          git tag "$TAG"
-          git push origin "$TAG"
-
-          cat > notes.md <<EOF
-          ## Automated Nightly Build \`$TAG\` (\`$(git rev-parse --short HEAD)\`)
-
-          ### 📦 Direct Downloads
-          - **[cubeforge-raylib-win64.zip](https://github.com/${{ github.repository }}/releases/download/$TAG/cubeforge-raylib-win64.zip)** — **Raylib 6.0 (OpenGL 3.3)** for Windows 7+.
-          - **[cubeforge-raylib-linux.zip](https://github.com/${{ github.repository }}/releases/download/$TAG/cubeforge-raylib-linux.zip)** — **Linux x86_64** standalone portable package.
-
-          ---
-          *Built automatically from commit \`$(git rev-parse HEAD)\`.*
-          EOF
-
-          find dist/ -type f -name "*.zip" -exec cp {} ./ \;
-
-          gh release create "$TAG" *.zip \
-            --latest \
-            --title "Nightly $TAG ($(date -u +%Y-%m-%d))" \
-            --notes-file notes.md
-
-      - name: Prune Old Nightlies (Retain last 7)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release list --limit 200 --json tagName -q '.[].tagName' \
-            | grep '^nightly-' | sort -t- -k2,2n | head -n -7 \
-            | while read -r t; do gh release delete "$t" --cleanup-tag --yes; done
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
