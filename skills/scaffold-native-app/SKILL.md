@@ -40,7 +40,6 @@ my-tool/
     │   │                  #   + frame-end balance tracker (ig_balance_check)
     │   ├── editor.h       # Shared bindings header
     │   └── vendor/rlImGui/  # Vendored rlImGui bridge (rlImGui.cpp, imgui_impl_raylib)
-    ├── lua/               # ALL UI, interaction, cameras, document state (embedded Lua 5.4)
     │   ├── main.lua       # Frame orchestration, modes 1-5, GPU setup deferred to first frame
     │   ├── doc.lua        # Document state model, serialization, mutation tracking
     │   ├── geom.lua       # Geometry helpers
@@ -350,8 +349,26 @@ mode too.
 
 ---
 
-## 6. Single Template: 2D + 3D
+## 5c. Mandatory Windows Continuous OpenGL Resize Subclass (Zero Content Stretching)
 
+During interactive window drag-resizing on Windows, `DefWindowProc` enters a modal loop on the UI thread that stalls the main loop inside `glfwPollEvents()`. DWM stretches the stale backbuffer unless new frames are actively presented from inside the window procedure.
+
+Every native Raylib + OpenGL tool MUST ship the Windows continuous resize subclass (see `docs/WINDOWS_OPENGL_RESIZE.md`):
+
+1. **Subclass Hook**: Install `GWLP_WNDPROC` subclass on Windows after `InitWindow()`.
+2. **Original Proc First**: Call `CallWindowProcW(g_orig_proc, ...)` *first* so GLFW and Raylib update `CORE.Window` sizes before rendering.
+3. **Present Without Polling (`present_no_poll()`)**:
+   ```cpp
+   static void present_no_poll() {
+       rlDrawRenderBatchActive();      // flush raylib GPU batch
+       SwapBuffers(wglGetCurrentDC()); // present frame, NO event polling
+   }
+   ```
+4. **The dt Invariant**: Raylib only computes frame time inside `EndDrawing()`. When using custom presentation on Windows, track delta time via `update_own_dt()` with monotonic `GetTime()` deltas, feeding `rlImGuiBeginDelta(g_own_dt)` and the `rl.get_frame_time()` Lua binding.
+
+---
+
+## 6. Single Template: 2D + 3D
 New scaffolds MUST be ONE raylib-only template in which **2D is a first-class
 subset of the 3D project** — there is no separate 2D template. One Raylib
 window, one Lua VM: a 2D texture-paint canvas (`lp.tex.*` / `lp.cam2d.*` /

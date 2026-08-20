@@ -909,3 +909,116 @@ function render_delete_cues(dl, cur_time)
     end
 end
 ```
+
+---
+
+## 15. Background Async Worker Queue & Non-Blocking Asset Streaming
+
+Eliminates frame stutter by delegating heavy archive decompression and CPU image decoding to worker threads while uploading textures on the main thread:
+
+```lua
+-- In asset_loader.lua / gallery.lua
+local async_loader = {
+    pending_requests = {},
+    cache = {},
+}
+
+function async_loader.request_texture(archive_path, file_path, tag)
+    if async_loader.cache[file_path] or async_loader.pending_requests[tag] then return end
+    async_loader.pending_requests[tag] = true
+    lp.async.read_archive_file(archive_path, file_path, tag)
+end
+
+function async_loader.poll_completions()
+    if not lp.async then return end
+    local completed = lp.async.poll_completed(24) -- batch limit per frame
+    if not completed then return end
+
+    for _, task in ipairs(completed) do
+        if task.type == "read_archive" and task.success and task.data then
+            -- Step 2: Offload CPU decoding to worker thread
+            lp.async.decode_dds(task.data, false, task.tag)
+        elseif task.type == "decode_dds" and task.success and task.tex_id then
+            -- Step 3: Main thread receives ready GPU texture ID (CPU image freed in C++)
+            async_loader.cache[task.tag] = task.tex_id
+            async_loader.pending_requests[task.tag] = nil
+            on_texture_ready(task.tag, task.tex_id)
+        end
+    end
+end
+```
+
+---
+
+## 16. Dynamic Floating Pill Toolbar with Responsive Auto-Sizing
+
+Avoids label clipping and sidebar overlap by calculating responsive width from viewport margins:
+
+```lua
+function ui.floating_toolbar(screen_w, inspector_open, inspector_w)
+    local padding = 6.0
+    local btn_h = 28.0
+    local side_margin = inspector_open and (inspector_w or 320.0) or 0.0
+    local max_avail = screen_w - side_margin - 24.0
+    local toolbar_w = math.max(300.0, math.min(840.0, max_avail))
+    local toolbar_h = btn_h + padding * 2.0
+
+    ig.set_next_window_pos(12.0, 12.0, ig.Cond_Always)
+    ig.set_next_window_size(toolbar_w, toolbar_h, ig.Cond_Always)
+    ig.set_next_window_bg_alpha(0.92)
+
+    local flags = ig.WindowFlags_NoDecoration | ig.WindowFlags_NoMove | ig.WindowFlags_NoSavedSettings
+    ig.window("##floating_toolbar", flags, function()
+        if ig.button("< Back (Esc)", 100, btn_h) then on_back() end
+        ig.same_line(0, 8); ig.text_colored("|", 0.35, 0.35, 0.4, 1.0); ig.same_line(0, 8)
+        
+        -- Auto-sized action buttons with distinct active highlights
+        if ui.toggle_button("Textures (T)", state.textures, 96, btn_h) then state.textures = not state.textures end
+        ig.same_line(0, 4)
+        if ui.toggle_button("Wire (W)", state.wireframe, 72, btn_h) then state.wireframe = not state.wireframe end
+        ig.same_line(0, 4)
+        if ui.toggle_button("Colliders (C)", state.colliders, 98, btn_h) then state.colliders = not state.colliders end
+        ig.same_line(0, 4)
+        if ui.toggle_button("Door Triggers (D)", state.doors, 130, btn_h) then state.doors = not state.doors end
+        ig.same_line(0, 4)
+        if ig.button("Inspector", 84, btn_h) then state.show_inspector = not state.show_inspector end
+    end)
+end
+```
+
+---
+
+## 17. Multi-Layer Collision & Geometry Tagged Inspection Panels
+
+Interactive inspection panels with colored layer badges and individual visibility controls:
+
+```lua
+function ui.collision_layers_panel(scene)
+    ig.text_colored("Collision Geometry (YCO Layers):", 0.96, 0.62, 0.04, 1.0)
+    ig.spacing()
+
+    local layers = {
+        { name = "Walkable Floor (__s)", field = "coll_walkable", vis_field = "walkable_visible", col = {0.1, 0.9, 0.4, 1.0}, desc = "Floor & slope walk meshes" },
+        { name = "Obstacle Walls (__w)", field = "coll_wall", vis_field = "wall_visible", col = {1.0, 0.4, 0.1, 1.0}, desc = "Solid obstacle & boundary walls" },
+        { name = "Camera Boundary (__c)", field = "coll_camera", vis_field = "camera_visible", col = {0.1, 0.6, 1.0, 1.0}, desc = "Camera occlusion volume (prevents clipping)" },
+    }
+
+    for _, lay in ipairs(layers) do
+        local obj = scene[lay.field]
+        if obj then
+            local ch, new_vis = ig.checkbox("##vis_" .. lay.field, scene[lay.vis_field] ~= false)
+            if ch then scene[lay.vis_field] = new_vis end
+            ig.same_line()
+            local tris = obj.info and obj.info.total_triangles or 0
+            ig.text_colored("[" .. lay.name .. "]", lay.col[1], lay.col[2], lay.col[3], lay.col[4])
+            ig.same_line()
+            ig.text(string.format("(%d tris)", tris))
+            if ig.is_item_hovered() then
+                ig.tooltip_(function() ig.text(lay.desc) end)
+            end
+        else
+            ig.text_colored("[" .. lay.name .. "] Not present", 0.45, 0.45, 0.5, 1.0)
+        end
+    end
+end
+```

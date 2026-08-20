@@ -25,6 +25,14 @@
           cp -r ${./tools} $out/tools
           cp -r ${./docs} $out/docs
         '';
+
+        devShells.default = pkgs.mkShell {
+          name = "llm-ux-dev";
+          packages = with pkgs; [
+            python3
+            git
+          ];
+        };
       }
     )
     // {

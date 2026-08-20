@@ -40,10 +40,26 @@ def main():
 
     # Copy template cleanly
     if target_dir.exists():
-        shutil.rmtree(target_dir)
+        try:
+            shutil.rmtree(target_dir)
+        except Exception:
+            # Fallback if there are read-only files or directories
+            try:
+                for root, dirs, files in os.walk(target_dir):
+                    for d in dirs:
+                        try:
+                            (Path(root) / d).chmod(0o777)
+                        except Exception:
+                            pass
+                    for f in files:
+                        try:
+                            (Path(root) / f).chmod(0o777)
+                        except Exception:
+                            pass
+                shutil.rmtree(target_dir, ignore_errors=True)
+            except Exception:
+                pass
     shutil.copytree(template_dir, target_dir)
-
-    # Clean intermediate build files if any
     for cleanup in ["build", "dist", ".git"]:
         p = target_dir / cleanup
         if p.exists():
@@ -61,6 +77,7 @@ def main():
                     text = text.replace("CUBEFORGE", name_upper)
                     text = text.replace("3D block editor with Raylib + ImGui + Lua", desc)
                     text = text.replace("High-performance native desktop creation tool", desc)
+                    fp.write_text(text, encoding="utf-8")
                 except Exception:
                     pass
 

@@ -403,3 +403,51 @@ Every project repository MUST include a dedicated `test_ui_smoke.lua` that execu
 2. Exercises `ig.key.*` named constants, ensuring no raw integer assertions occur.
 3. Tests `reset_mouse_drag_delta`, modal state transitions (extrude/cancel/commit), and drawlist methods.
 4. **Any crash, nil call, or ImGui assertion during smoke testing MUST immediately fail `make test`.**
+
+---
+
+## 7. Background Async Asset Streaming & Worker Queue Doctrine
+
+Heavy I/O, archive decompression, and image/model decoding on the main thread cause UI stutter, dropped frames, and sluggish interaction.
+
+1. **The Non-Blocking Main Thread Rule**:
+   - NEVER synchronously read multi-megabyte files, decompress game archives, or decode large texture collections inside UI frame callbacks or draw loops.
+   - Use a worker thread pool (`AsyncQueue` / `lp.async.*`) for background archive reading and CPU-side texture decoding (e.g. DDS / PNG / JPEG).
+
+2. **Main Thread GPU Upload & Immediate Memory Cleanup**:
+   - Background threads decode raw compressed bytes into CPU `Image` structures (`t->result_image`).
+   - The main thread polls completed tasks in small batches per frame (e.g. 16–32 items/frame in `lp.async.poll_completed`).
+   - **MANDATORY Memory Invariant**: Immediately call `UnloadImage(img)` and clear `img.data = nullptr` after calling `LoadTextureFromImage(img)` to prevent catastrophic CPU memory leaks.
+
+3. **Render Texture Settling Invariant (Avoid Frame-1 Blankness)**:
+   - Render textures created or loaded on the first frame MUST be dirtied/rendered across at least 2 consecutive frames (`rendered_frames >= 2`) before locking into a cached state, preventing blank thumbnails caused by un-swapped GPU framebuffers during window startup.
+
+4. **Upfront Shader Compilation (Anti-Lazy Invariant)**:
+   - Compile all custom shaders (`LoadShaderFromMemory`) once UPFRONT during engine startup (`init_engine`), NEVER lazily inside an active `BeginTextureMode()` FBO pass or draw loop. Compiling and linking GLSL programs inside an active FBO pass resets the OpenGL program binding and disrupts the active draw call.
+
+---
+
+## 8. Non-Destructive Material State & Shader Layout Standards
+
+1. **Preserve Bound Texture Handles Across Render Modes**:
+   - When rendering wireframe, flat untextured preview, or collision overlay passes, NEVER overwrite or nil-out the underlying model's diffuse texture reference. Always retain custom texture bindings (`mat_info.has_custom_texture`) and restore them seamlessly when toggling back to textured mode.
+
+2. **Raylib 6.0 Custom Shader Layout Mapping (GLSL 330)**:
+   - Raylib's `UploadMesh()` sets vertex attributes at fixed hardware locations: 0=Position, 1=TexCoord, 2=Normal, 3=Color.
+   - Custom vertex shaders MUST explicitly bind these layout locations in GLSL 330:
+     ```glsl
+     #version 330
+     layout(location = 0) in vec3 vertexPosition;
+     layout(location = 1) in vec2 vertexTexCoord;
+     layout(location = 2) in vec3 vertexNormal;
+     layout(location = 3) in vec4 vertexColor;
+     ```
+     Without explicit `layout(location = N)`, GPU driver attribute remapping causes `vertexTexCoord` to be unmapped, evaluating sampled textures to solid white.
+
+3. **Multi-Layer Collision & Geometry Color Grammar**:
+   - When rendering multi-layered geometric overlays (collision, boundaries, triggers), use consistent semantic color coding:
+     - **Emerald Green** `(26, 230, 102)` $\rightarrow$ Walkable floor / terrain collision (`__s.yco`).
+     - **Amber Orange** `(255, 102, 26)` $\rightarrow$ Solid wall / obstacle collision (`__w.yco`).
+     - **Sky Blue** `(26, 153, 255)` $\rightarrow$ Camera occlusion volumes / room boundaries (`__c.yco`).
+     - **Translucent Gold** `(245, 180, 20)` $\rightarrow$ Interactive door / area triggers.
+     - Provide individual layer checkboxes in the inspector sidebar so users can isolate specific boundary types without visual clutter.
